@@ -358,12 +358,15 @@ async function getCandles(symbol, interval, marketType) {
     candles = convertKlines(raw);
   }
 
-  if (!Array.isArray(candles) || candles.length < 50) {
-    throw new Error(
-      "Insufficient historical candles for " + interval +
-      ". Received " + (candles?.length || 0) + "."
-    );
-  }
+const minimumCandles = interval === "30s" ? 30 : 50;
+
+if (!Array.isArray(candles) || candles.length < minimumCandles) {
+  throw new Error(
+    "Insufficient historical candles for " + interval +
+    ". Required " + minimumCandles +
+    ", received " + (candles?.length || 0) + "."
+  );
+}
 
   return candles;
 }
