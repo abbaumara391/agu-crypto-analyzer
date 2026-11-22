@@ -1,0 +1,18 @@
+{
+"id": "./",
+"name": "AGU Crypto Analyzer",
+"short_name": "AGU Crypto",
+"description": "AGU cryptocurrency market analysis and smart alerts.",
+"start_url": "./",
+"scope": "./",
+"display": "standalone",
+"orientation": "portrait",
+"background_color": "#061426",
+"theme_color": "#071a2e",
+"categories": [
+"finance",
+"education",
+"utilities"
+],
+"icons": []
+}
