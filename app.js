@@ -452,7 +452,10 @@ result.signal === "BUY"
 : "signal-wait";
 
 function metric(title, value) {
-return "<div class="metric"> <span>${title}</span> <strong>${value}</strong> </div>";
+  return `<div class="metric">
+    <span>${title}</span>
+    <strong>${value}</strong>
+  </div>`;
 }
 
 box.className = "analysis-result";
