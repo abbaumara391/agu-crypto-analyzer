@@ -1,1 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#071a2e">
+  <meta name="description" content="AGU Crypto Analyzer — independent cryptocurrency market analysis and alerts.">
+  <title>AGU Crypto Analyzer</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#">
+    <span class="brand-mark">AGU</span>
+    <span>CRYPTO <b>ANALYZER</b><small>MARKET INTELLIGENCE</small></span>
+  </a>
+  <div class="top-actions">
+    <span id="connection" class="pill muted">Connecting…</span>
+    <button id="notifyBtn" class="outline">Enable alerts</button>
+  </div>
+</header>
 
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">INDEPENDENT TRADING INTELLIGENCE</p>
+      <h1>Read the market.<br><span>Trade with a plan.</span></h1>
+      <p class="sub">Live prices, technical analysis and opportunity alerts. Signals are estimates, never guarantees.</p>
+    </div>
+    <div class="hero-stat">
+      <span>FREE ANALYSES LEFT</span>
+      <strong id="credits">4 / 4</strong>
+      <small>Premium access will be activated only after verified payment.</small>
+    </div>
+  </section>
+
+  <section class="market-strip">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">MARKET WATCH</p>
+        <h2>Live crypto prices</h2>
+      </div>
+      <button id="refreshBtn" class="outline">↻ Refresh</button>
+    </div>
+    <div id="marketGrid" class="market-grid">
+      <div class="loading">Loading market data…</div>
+    </div>
+  </section>
+
+  <section class="panel analyzer">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">TECHNICAL ENGINE</p>
+        <h2>Market analyzer</h2>
+      </div>
+      <span class="pill">Spot + Futures context</span>
+    </div>
+
+    <div class="controls">
+      <label>Asset
+        <select id="symbol">
+          <option>BTCUSDT</option>
+          <option>ETHUSDT</option>
+          <option>BNBUSDT</option>
+          <option>SOLUSDT</option>
+          <option>XRPUSDT</option>
+          <option>DOGEUSDT</option>
+          <option>ADAUSDT</option>
+          <option>AVAXUSDT</option>
+          <option>LINKUSDT</option>
+          <option>TONUSDT</option>
+        </select>
+      </label>
+
+      <label>Market
+        <select id="marketType">
+          <option value="spot">Spot</option>
+          <option value="futures">USDT-M Futures</option>
+        </select>
+      </label>
+
+      <label>Timeframe
+        <select id="interval">
+          <option value="15m">15 minutes</option>
+          <option value="1h" selected>1 hour</option>
+          <option value="4h">4 hours</option>
+          <option value="1d">1 day</option>
+        </select>
+      </label>
+
+      <button id="analyzeBtn" class="primary">Analyze market</button>
+    </div>
+
+    <div id="analysisResult" class="analysis-empty">
+      Choose an asset and run an analysis to see the latest technical setup.
+    </div>
+
+    <p class="disclaimer">
+      Educational market analysis only. Not financial advice. Crypto trading can result in substantial losses. Never risk money you cannot afford to lose.
+    </p>
+  </section>
+
+  <section class="two-col">
+    <div class="panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">OPPORTUNITY MONITOR</p>
+          <h2>Smart alerts</h2>
+        </div>
+        <span class="pill green">Monitoring while page is open</span>
+      </div>
+
+      <div class="alert-controls">
+        <label>Watch asset
+          <select id="alertSymbol">
+            <option>BTCUSDT</option>
+            <option>ETHUSDT</option>
+            <option>BNBUSDT</option>
+            <option>SOLUSDT</option>
+            <option>XRPUSDT</option>
+            <option>DOGEUSDT</option>
+          </select>
+        </label>
+
+        <label>Timeframe
+          <select id="alertInterval">
+            <option value="15m">15m</option>
+            <option value="1h" selected>1h</option>
+            <option value="4h">4h</option>
+          </select>
+        </label>
+
+        <button id="monitorBtn" class="primary">Start monitoring</button>
+      </div>
+
+      <div id="alertStatus" class="muted-note">
+        Monitoring is off. Keep this page open for periodic checks.
+      </div>
+
+      <div id="alertLog" class="alert-log">
+        <p class="muted-note">No alerts yet.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">MEMBERSHIP</p>
+          <h2>Free & Premium</h2>
+        </div>
+      </div>
+
+      <div class="plans">
+        <div class="plan">
+          <h3>Free</h3>
+          <strong>4 analyses</strong>
+          <p>Live prices, basic technical analysis and limited alerts.</p>
+          <span class="pill green">Available</span>
+        </div>
+
+        <div class="plan premium">
+          <h3>Premium</h3>
+          <strong>Advanced access</strong>
+          <p>Advanced AI analysis, futures signals, multi-timeframe tools and scanner.</p>
+          <span class="pill gold">Coming soon</span>
+        </div>
+      </div>
+
+      <p class="support">
+        Need help with access or payment?<br>
+        Email <a href="mailto:support@agulibrary.com">support@agulibrary.com</a><br>
+        <a href="https://wa.me/message/OJTN4XM5YCWWH1" target="_blank" rel="noopener">WhatsApp customer support</a>
+      </p>
+
+      <p class="muted-note">
+        Premium payments are not enabled in this starter release. Do not send money until an official payment and verification system is installed.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <b>AGU CRYPTO ANALYZER</b>
+    <span>Independent project · Free static hosting compatible</span>
+    <span>© <span id="year"></span> AGU</span>
+  </footer>
+</main>
+
+<div id="toast" class="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>
