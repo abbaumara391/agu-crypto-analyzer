@@ -375,9 +375,6 @@ if (!Array.isArray(candles) || candles.length < minimumCandles) {
   );
 }
 
-  return candles;
-}
-
 /* =========================================
    TECHNICAL INDICATORS
 ========================================= */
