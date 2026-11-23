@@ -241,17 +241,17 @@ function aggregateCandles(candles, intervalMs) {
 
 async function getThirtySecondCandles(symbol, marketType) {
   const now = Date.now();
+
+  // Request approximately 100 minutes of trade history.
   const startTime = now - (200 * 30000) - 30000;
 
   let trades = [];
   let nextStart = startTime;
 
-  const path = "/aggTrades";
-
-  for (let page = 0; page < 10; page++) {
+  for (let page = 0; page < 100; page++) {
     const batch = await marketRequest(
       marketType,
-      path,
+      "/aggTrades",
       {
         symbol,
         startTime: String(nextStart),
@@ -260,17 +260,24 @@ async function getThirtySecondCandles(symbol, marketType) {
       }
     );
 
-    if (!Array.isArray(batch) || !batch.length) break;
+    if (!Array.isArray(batch) || batch.length === 0) {
+      break;
+    }
 
     trades.push(...batch);
 
-    const lastTime = Number(batch[batch.length - 1].T);
+    const lastTrade = batch[batch.length - 1];
+    const lastTime = Number(lastTrade.T);
 
-    if (lastTime >= now - 30000) break;
+    if (lastTime >= now - 30000) {
+      break;
+    }
+
+    if (batch.length < 1000) {
+      break;
+    }
 
     nextStart = lastTime + 1;
-
-    if (batch.length < 1000) break;
   }
 
   if (!trades.length) {
