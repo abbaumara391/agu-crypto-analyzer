@@ -1,1478 +1,1185 @@
 "use strict";
 
-/* AGU CRYPTO ANALYZER — V3 RELIABILITY ENGINE
+/* AGU CRYPTO ANALYZER — V3.1 RELIABILITY ENGINE
    Owner: Umar Mohammed | Spot + USDT-M Futures | No auto-trading
 */
 
-const API = {
-  spot: "https://data-api.binance.vision/api/v3",
-  futures: "https://fapi.binance.com/fapi/v1"
+const API={
+ spot:"https://data-api.binance.vision/api/v3",
+ futures:"https://fapi.binance.com/fapi/v1"
 };
 
-const ASSETS = [
-  "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
-  "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT",
-  "LINKUSDT", "TONUSDT"
+const ASSETS=[
+ "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
+ "DOGEUSDT","ADAUSDT","AVAXUSDT","LINKUSDT","TONUSDT"
 ];
 
-const TF = {
-  "1m": { native: "1m", ms: 60000 },
-  "5m": { native: "5m", ms: 300000 },
-  "10m": { base: "5m", ms: 600000 },
-  "15m": { native: "15m", ms: 900000 },
-  "30m": { native: "30m", ms: 1800000 },
-  "1h": { native: "1h", ms: 3600000 },
-  "4h": { native: "4h", ms: 14400000 },
-  "1d": { native: "1d", ms: 86400000 },
-  "1w": { native: "1w", ms: 604800000 }
+const TF={
+ "1m":{native:"1m",ms:60000},
+ "5m":{native:"5m",ms:300000},
+ "10m":{base:"5m",ms:600000},
+ "15m":{native:"15m",ms:900000},
+ "30m":{native:"30m",ms:1800000},
+ "1h":{native:"1h",ms:3600000},
+ "4h":{native:"4h",ms:14400000},
+ "1d":{native:"1d",ms:86400000},
+ "1w":{native:"1w",ms:604800000}
 };
 
-const $ = id => document.getElementById(id);
+const $=id=>document.getElementById(id);
 
-const CREDIT = "agu_free_credits";
-const MC = "agu_market_cache_v3";
-const MT = "agu_market_cache_time_v3";
-const AK = "agu_alert_state_v3";
-const LK = "agu_alert_log_v3";
+const CREDIT="agu_free_credits";
+const MC="agu_market_cache_v3";
+const MT="agu_market_cache_time_v3";
+const AK="agu_alert_state_v3";
+const LK="agu_alert_log_v3";
 
-let monitoring = false;
-let monitorTimer = null;
-let alertBusy = false;
-let lastAlert = readJSON(AK, {});
+let monitoring=false;
+let monitorTimer=null;
+let alertBusy=false;
+let lastAlert=readJSON(AK,{});
 
-
-/* =========================================
-   GENERAL HELPERS
-========================================= */
-
-function readJSON(key, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem(key)) ?? fallback;
-  } catch (_) {
-    return fallback;
-  }
+function readJSON(k,d){
+ try{return JSON.parse(localStorage.getItem(k))??d}
+ catch(_){return d}
 }
 
-function money(value) {
-  if (!Number.isFinite(Number(value))) return "N/A";
-
-  const number = Number(value);
-
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: number >= 1000 ? 2 : 8
-  }).format(number);
+function money(v){
+ if(!Number.isFinite(Number(v)))return "N/A";
+ let n=Number(v);
+ return new Intl.NumberFormat("en-US",{
+  minimumFractionDigits:2,
+  maximumFractionDigits:n>=1000?2:8
+ }).format(n);
 }
 
-function escapeHTML(value) {
-  return String(value).replace(/[&<>"']/g, character => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[character]));
+function esc(s){
+ return String(s).replace(/[&<>"']/g,c=>({
+  "&":"&amp;","<":"&lt;",">":"&gt;",
+  '"':"&quot;","'":"&#39;"
+ }[c]));
 }
 
-function toast(message) {
-  const element = $("toast");
-
-  if (!element) return;
-
-  element.textContent = message;
-  element.classList.add("show");
-
-  setTimeout(() => {
-    element.classList.remove("show");
-  }, 4000);
+function toast(s){
+ let e=$("toast");
+ if(e){
+  e.textContent=s;
+  e.classList.add("show");
+  setTimeout(()=>e.classList.remove("show"),4000);
+ }
 }
 
-function makeURL(base, path, params = {}) {
-  const query = new URLSearchParams(params).toString();
-
-  return base + path + (query ? "?" + query : "");
+function url(base,path,p={}){
+ let q=new URLSearchParams(p).toString();
+ return base+path+(q?"?"+q:"");
 }
 
-async function request(url) {
-  if (!navigator.onLine) {
-    throw new Error("Device is offline.");
-  }
+async function request(u){
+ if(!navigator.onLine)throw Error("Device is offline.");
 
-  const controller = new AbortController();
+ let c=new AbortController();
+ let t=setTimeout(()=>c.abort(),20000);
 
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 20000);
-
-  try {
-    const response = await fetch(url, {
-      cache: "no-store",
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      throw new Error("Market API HTTP " + response.status);
-    }
-
-    return await response.json();
-
-  } catch (error) {
-    if (error.name === "AbortError") {
-      throw new Error("Market request timed out.");
-    }
-
-    throw error;
-
-  } finally {
-    clearTimeout(timeout);
-  }
+ try{
+  let r=await fetch(u,{cache:"no-store",signal:c.signal});
+  if(!r.ok)throw Error("Market API HTTP "+r.status);
+  return await r.json();
+ }catch(e){
+  if(e.name==="AbortError")throw Error("Market request timed out.");
+  throw e;
+ }finally{
+  clearTimeout(t);
+ }
 }
 
-function setConnection(status, message) {
-  const element = $("connection");
+function connection(state,msg){
+ let e=$("connection");
+ if(!e)return;
 
-  if (!element) return;
+ e.textContent=state==="live"?"● Live":
+ state==="cached"?"● Cached":"● Offline";
 
-  element.textContent =
-    status === "live"
-      ? "● Live"
-      : status === "cached"
-        ? "● Cached"
-        : "● Offline";
-
-  element.className =
-    status === "live"
-      ? "pill green"
-      : "pill muted";
-
-  element.title = message || "";
+ e.className=state==="live"?"pill green":"pill muted";
+ e.title=msg||"";
 }
 
-function marketBase(market) {
-  return market === "futures"
-    ? API.futures
-    : API.spot;
+function base(m){
+ return m==="futures"?API.futures:API.spot;
 }
 
-async function marketRequest(market, path, params = {}) {
-  return request(
-    makeURL(marketBase(market), path, params)
-  );
+async function marketReq(m,path,p={}){
+ return request(url(base(m),path,p));
 }
 
-
-/* =========================================
-   LIVE MARKET WATCH
-========================================= */
-
-function renderMarketCards(items, cachedAt = null) {
-  const grid = $("marketGrid");
-
-  if (!grid) return;
-
-  const html = items.map(item => {
-    const change = Number(item.priceChangePercent);
-    const positive = change >= 0;
-
-    return `
-      <article class="market-card">
-        <div class="coin">
-          ${escapeHTML(item.symbol.replace("USDT", ""))}
-        </div>
-
-        <span class="price">
-          $${money(Number(item.lastPrice))}
-        </span>
-
-        <span class="${positive ? "positive" : "negative"}">
-          ${positive ? "+" : ""}${change.toFixed(2)}%
-        </span>
-
-        <div class="muted-note">
-          24-hour change
-        </div>
-      </article>
-    `;
-  }).join("");
-
-  const cacheMessage = cachedAt
-    ? `<p class="muted-note">
-         Cached snapshot: ${new Date(cachedAt).toLocaleString()}
-         — NOT live prices.
-       </p>`
-    : "";
-
-  grid.innerHTML = html + cacheMessage;
-}
-
-async function loadMarkets() {
-  const grid = $("marketGrid");
-
-  if (!grid) return;
-
-  try {
-    const data = await request(
-      makeURL(API.spot, "/ticker/24hr")
-    );
-
-    if (!Array.isArray(data)) {
-      throw new Error("Unexpected API response.");
-    }
-
-    const selected = data
-      .filter(item => ASSETS.includes(item.symbol))
-      .sort((a, b) =>
-        ASSETS.indexOf(a.symbol) -
-        ASSETS.indexOf(b.symbol)
-      );
-
-    if (selected.length !== ASSETS.length) {
-      throw new Error("Incomplete market response.");
-    }
-
-    renderMarketCards(selected);
-
-    localStorage.setItem(
-      MC,
-      JSON.stringify(selected)
-    );
-
-    localStorage.setItem(
-      MT,
-      String(Date.now())
-    );
-
-    setConnection(
-      "live",
-      "Live prices received " + new Date().toLocaleString()
-    );
-
-  } catch (error) {
-    console.warn(error);
-
-    const cached = readJSON(MC, null);
-
-    const cachedAt =
-      Number(localStorage.getItem(MT)) || null;
-
-    if (cached?.length) {
-      renderMarketCards(cached, cachedAt);
-
-      setConnection(
-        "cached",
-        "Cached only; age " +
-        (cachedAt
-          ? Math.round((Date.now() - cachedAt) / 60000) + " minutes"
-          : "unknown") +
-        ". " + error.message
-      );
-
-    } else {
-      grid.innerHTML =
-        `<p class="muted-note">
-          Market data unavailable: ${escapeHTML(error.message)}
-        </p>`;
-
-      setConnection("offline", error.message);
-    }
-  }
-}
-
-
-/* =========================================
-   CANDLE DATA
-========================================= */
-
-function convertKlines(raw) {
-  if (!Array.isArray(raw)) {
-    throw new Error("Invalid candle response.");
-  }
-
-  return raw.map(candle => ({
-    time: Number(candle[0]),
-    open: Number(candle[1]),
-    high: Number(candle[2]),
-    low: Number(candle[3]),
-    close: Number(candle[4]),
-    volume: Number(candle[5]),
-    closeTime: Number(candle[6])
-  })).filter(candle =>
-    Object.values(candle).every(Number.isFinite) &&
-    candle.high >= candle.low
-  );
-}
-
-function aggregateCandles(candles, intervalMs) {
-  const groups = new Map();
-
-  for (const candle of candles) {
-    const bucket =
-      Math.floor(candle.time / intervalMs) * intervalMs;
-
-    let group = groups.get(bucket);
-
-    if (!group) {
-      groups.set(bucket, {
-        time: bucket,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
-        closeTime: bucket + intervalMs - 1
-      });
-
-    } else {
-      group.high = Math.max(group.high, candle.high);
-      group.low = Math.min(group.low, candle.low);
-      group.close = candle.close;
-      group.volume += candle.volume;
-    }
-  }
-
-  return Array.from(groups.values())
-    .sort((a, b) => a.time - b.time);
-}
-
-async function getCandles(symbol, interval, market) {
-  const config = TF[interval];
-
-  if (!config) {
-    throw new Error("Unsupported timeframe: " + interval);
-  }
-
-  const raw = await marketRequest(
-    market,
-    "/klines",
-    {
-      symbol,
-      interval: config.native || config.base,
-      limit: "500"
-    }
-  );
-
-  let candles = convertKlines(raw);
-
-  if (config.base) {
-    candles = aggregateCandles(
-      candles,
-      config.ms
-    );
-  }
-
-  const now = Date.now();
-
-  // Exclude unfinished candles.
-  candles = candles.filter(
-    candle => candle.closeTime < now
-  );
-
-  candles = candles.slice(-400);
-
-  const minimum =
-    interval === "1w" ? 200 : 220;
-
-  if (candles.length < minimum) {
-    throw new Error(
-      `Insufficient completed candles for ${interval}: ` +
-      `${candles.length}; need ${minimum}.`
-    );
-  }
-
-  const last = candles[candles.length - 1];
-
-  const age = now - last.closeTime;
-
-  if (age > config.ms * 2.2) {
-    throw new Error(
-      "Latest completed candle is stale; analysis stopped."
-    );
-  }
-
-  return {
-    candles,
-    lastCandleClose: last.closeTime,
-    age
-  };
-}
-
-
-/* =========================================
-   TECHNICAL INDICATORS
-========================================= */
-
-function sma(values, period) {
-  if (values.length < period) return null;
-
-  return values
-    .slice(-period)
-    .reduce((a, b) => a + b, 0) / period;
-}
-
-function ema(values, period) {
-  if (values.length < period) return null;
-
-  let result = values
-    .slice(0, period)
-    .reduce((a, b) => a + b, 0) / period;
-
-  const multiplier = 2 / (period + 1);
-
-  for (let i = period; i < values.length; i++) {
-    result += (values[i] - result) * multiplier;
-  }
-
-  return result;
-}
-
-function calculateRSI(values, period = 14) {
-  if (values.length <= period) return null;
-
-  let gains = 0;
-  let losses = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const change = values[i] - values[i - 1];
-
-    gains += Math.max(change, 0);
-    losses += Math.max(-change, 0);
-  }
-
-  let averageGain = gains / period;
-  let averageLoss = losses / period;
-
-  for (let i = period + 1; i < values.length; i++) {
-    const change = values[i] - values[i - 1];
-
-    averageGain =
-      (averageGain * (period - 1) +
-        Math.max(change, 0)) / period;
-
-    averageLoss =
-      (averageLoss * (period - 1) +
-        Math.max(-change, 0)) / period;
-  }
-
-  if (averageLoss === 0) {
-    return averageGain === 0 ? 50 : 100;
-  }
-
-  const rs = averageGain / averageLoss;
-
-  return 100 - 100 / (1 + rs);
-}
-
-function calculateMACD(values) {
-  const series = [];
-
-  for (let i = 26; i <= values.length; i++) {
-    const part = values.slice(0, i);
-
-    series.push(
-      ema(part, 12) - ema(part, 26)
-    );
-  }
-
-  if (series.length < 9) return null;
-
-  const line = series[series.length - 1];
-  const signal = ema(series, 9);
-
-  return {
-    line,
-    signal,
-    histogram: line - signal
-  };
-}
-
-function calculateATR(candles, period = 14) {
-  const trueRanges = [];
-
-  for (let i = 1; i < candles.length; i++) {
-    const current = candles[i];
-    const previous = candles[i - 1];
-
-    trueRanges.push(Math.max(
-      current.high - current.low,
-      Math.abs(current.high - previous.close),
-      Math.abs(current.low - previous.close)
-    ));
-  }
-
-  if (trueRanges.length < period) return null;
-
-  let value =
-    trueRanges.slice(0, period)
-      .reduce((a, b) => a + b, 0) / period;
-
-  for (let i = period; i < trueRanges.length; i++) {
-    value =
-      (value * (period - 1) + trueRanges[i]) / period;
-  }
-
-  return value;
-}
-
-function calculateADX(candles, period = 14) {
-  if (candles.length < period * 2 + 2) {
-    return null;
-  }
-
-  const trueRanges = [];
-  const plusDM = [];
-  const minusDM = [];
-
-  for (let i = 1; i < candles.length; i++) {
-    const current = candles[i];
-    const previous = candles[i - 1];
-
-    const up = current.high - previous.high;
-    const down = previous.low - current.low;
-
-    plusDM.push(
-      up > down && up > 0 ? up : 0
-    );
-
-    minusDM.push(
-      down > up && down > 0 ? down : 0
-    );
-
-    trueRanges.push(Math.max(
-      current.high - current.low,
-      Math.abs(current.high - previous.close),
-      Math.abs(current.low - previous.close)
-    ));
-  }
-
-  let trSmooth = trueRanges
-    .slice(0, period)
-    .reduce((a, b) => a + b, 0);
-
-  let plusSmooth = plusDM
-    .slice(0, period)
-    .reduce((a, b) => a + b, 0);
-
-  let minusSmooth = minusDM
-    .slice(0, period)
-    .reduce((a, b) => a + b, 0);
-
-  const dx = [];
-
-  for (let i = period; i < trueRanges.length; i++) {
-    if (i > period) {
-      trSmooth =
-        trSmooth - trSmooth / period + trueRanges[i];
-
-      plusSmooth =
-        plusSmooth - plusSmooth / period + plusDM[i];
-
-      minusSmooth =
-        minusSmooth - minusSmooth / period + minusDM[i];
-    }
-
-    if (trSmooth <= 0) continue;
-
-    const plusDI = 100 * plusSmooth / trSmooth;
-    const minusDI = 100 * minusSmooth / trSmooth;
-
-    const sum = plusDI + minusDI;
-
-    dx.push(
-      sum === 0
-        ? 0
-        : 100 * Math.abs(plusDI - minusDI) / sum
-    );
-  }
-
-  if (dx.length < period) return null;
-
-  let adx = dx
-    .slice(0, period)
-    .reduce((a, b) => a + b, 0) / period;
-
-  for (let i = period; i < dx.length; i++) {
-    adx =
-      (adx * (period - 1) + dx[i]) / period;
-  }
-
-  return adx;
-}
-
-function calculateBollinger(values, period = 20) {
-  if (values.length < period) return null;
-
-  const middle = sma(values, period);
-
-  const variance = values
-    .slice(-period)
-    .reduce(
-      (sum, value) => sum + Math.pow(value - middle, 2),
-      0
-    ) / period;
-
-  const deviation = Math.sqrt(variance);
-
-  return {
-    upper: middle + 2 * deviation,
-    middle,
-    lower: middle - 2 * deviation
-  };
-}
-
-
-/* =========================================
-   MARKET STRUCTURE AND FIBONACCI
-========================================= */
-
-function findLevels(candles) {
-  const recent = candles.slice(-100);
-
-  const support = Math.min(
-    ...recent.map(c => c.low)
-  );
-
-  const resistance = Math.max(
-    ...recent.map(c => c.high)
-  );
-
-  const range = resistance - support;
-
-  return {
-    support,
-    resistance,
-
-    fibonacci: range > 0
-      ? {
-          level236: resistance - range * 0.236,
-          level382: resistance - range * 0.382,
-          level500: resistance - range * 0.5,
-          level618: resistance - range * 0.618,
-          level786: resistance - range * 0.786
-        }
-      : null
-  };
-}
-
-
-/* =========================================
-   CANDLESTICK PATTERNS
-========================================= */
-
-function detectPattern(candles) {
-  const current = candles[candles.length - 1];
-  const previous = candles[candles.length - 2];
-
-  const body = Math.abs(
-    current.close - current.open
-  );
-
-  const range = current.high - current.low;
-
-  if (range <= 0) {
-    return "No clear pattern";
-  }
-
-  const upperWick =
-    current.high - Math.max(current.open, current.close);
-
-  const lowerWick =
-    Math.min(current.open, current.close) - current.low;
-
-  if (
-    previous.close < previous.open &&
-    current.close > current.open &&
-    current.close >= previous.open &&
-    current.open <= previous.close
-  ) {
-    return "Bullish engulfing";
-  }
-
-  if (
-    previous.close > previous.open &&
-    current.close < current.open &&
-    current.close <= previous.open &&
-    current.open >= previous.close
-  ) {
-    return "Bearish engulfing";
-  }
-
-  if (body / range < 0.1) {
-    return "Doji";
-  }
-
-  if (lowerWick > body * 2 && upperWick < body) {
-    return "Hammer-like candle";
-  }
-
-  if (upperWick > body * 2 && lowerWick < body) {
-    return "Shooting-star-like candle";
-  }
-
-  return "No clear pattern";
-}
-
-
-/* =========================================
-   VOLUME ANALYSIS
-========================================= */
-
-function analyzeVolume(candles) {
-  const volumes = candles.map(c => c.volume);
-
-  const average = sma(
-    volumes.slice(-21, -1),
-    20
-  );
-
-  const current = volumes[volumes.length - 1];
-
-  return {
-    current,
-    average,
-    ratio: average > 0 ? current / average : null
-  };
-}
-
-
-/* =========================================
-   MAIN SIGNAL ENGINE
-========================================= */
-
-function analyzeCandles(candles) {
-  const closes = candles.map(c => c.close);
-
-  const price = closes[closes.length - 1];
-
-  const rsi = calculateRSI(closes);
-  const ema20 = ema(closes, 20);
-  const ema50 = ema(closes, 50);
-  const ema200 = ema(closes, 200);
-
-  const macd = calculateMACD(closes);
-  const atr = calculateATR(candles);
-  const adx = calculateADX(candles);
-
-  const bollinger = calculateBollinger(closes);
-  const levels = findLevels(candles);
-  const volume = analyzeVolume(candles);
-  const pattern = detectPattern(candles);
-
-  let bullish = 0;
-  let bearish = 0;
-
-  const evidence = [];
-
-  if (ema20 !== null && ema50 !== null) {
-    if (ema20 > ema50) {
-      bullish++;
-      evidence.push("EMA20 above EMA50");
-    } else {
-      bearish++;
-      evidence.push("EMA20 below EMA50");
-    }
-  }
-
-  if (ema50 !== null && ema200 !== null) {
-    if (ema50 > ema200) {
-      bullish++;
-      evidence.push("EMA50 above EMA200");
-    } else {
-      bearish++;
-      evidence.push("EMA50 below EMA200");
-    }
-  }
-
-  if (rsi !== null) {
-    if (rsi > 52 && rsi < 70) {
-      bullish++;
-      evidence.push("RSI bullish zone");
-    } else if (rsi < 48 && rsi > 30) {
-      bearish++;
-      evidence.push("RSI bearish zone");
-    }
-  }
-
-  if (macd) {
-    if (macd.histogram > 0) {
-      bullish++;
-      evidence.push("MACD histogram positive");
-    } else if (macd.histogram < 0) {
-      bearish++;
-      evidence.push("MACD histogram negative");
-    }
-  }
-
-  if (ema20 !== null) {
-    if (price > ema20) {
-      bullish++;
-      evidence.push("Price above EMA20");
-    } else {
-      bearish++;
-      evidence.push("Price below EMA20");
-    }
-  }
-
-  if (pattern === "Bullish engulfing") {
-    bullish++;
-    evidence.push(pattern);
-  }
-
-  if (pattern === "Bearish engulfing") {
-    bearish++;
-    evidence.push(pattern);
-  }
-
-  let signal = "WAIT";
-
-  if (
-    bullish >= 4 &&
-    bullish > bearish &&
-    adx !== null &&
-    adx >= 18
-  ) {
-    signal = "BUY";
-
-  } else if (
-    bearish >= 4 &&
-    bearish > bullish &&
-    adx !== null &&
-    adx >= 18
-  ) {
-    signal = "SELL";
-  }
-
-  let stopLoss = null;
-  let takeProfit1 = null;
-  let takeProfit2 = null;
-  let takeProfit3 = null;
-  let riskDistance = null;
-
-  if (signal !== "WAIT") {
-    riskDistance = atr * 1.5;
-
-    const percentage = riskDistance / price;
-
-    if (
-      !Number.isFinite(riskDistance) ||
-      riskDistance <= 0 ||
-      percentage < 0.001 ||
-      percentage > 0.15
-    ) {
-      signal = "WAIT";
-
-      evidence.push(
-        "Setup rejected: stop distance outside safety limits"
-      );
-
-    } else if (signal === "BUY") {
-      stopLoss = price - riskDistance;
-
-      takeProfit1 = price + riskDistance;
-
-      takeProfit2 =
-        price + riskDistance * (2.5 / 1.5);
-
-      takeProfit3 =
-        price + riskDistance * (3.5 / 1.5);
-
-    } else {
-      stopLoss = price + riskDistance;
-
-      takeProfit1 = price - riskDistance;
-
-      takeProfit2 =
-        price - riskDistance * (2.5 / 1.5);
-
-      takeProfit3 =
-        price - riskDistance * (3.5 / 1.5);
-    }
-  }
-
-  return {
-    price,
-    signal,
-    bullish,
-    bearish,
-    rsi,
-    ema20,
-    ema50,
-    ema200,
-    macd,
-    atr,
-    adx,
-    bollinger,
-    levels,
-    volume,
-    pattern,
-    stopLoss,
-    takeProfit1,
-    takeProfit2,
-    takeProfit3,
-    riskDistance,
-    evidence
-  };
-}
-
-
-/* =========================================
-   DISPLAY ANALYSIS
-========================================= */
-
-function displayAnalysis(
-  result,
-  symbol,
-  interval,
-  market,
-  candleInfo
-) {
-  const box = $("analysisResult");
-
-  if (!box) return;
-
-  const signalClass =
-    result.signal === "BUY"
-      ? "signal-buy"
-      : result.signal === "SELL"
-        ? "signal-sell"
-        : "signal-wait";
-
-  function metric(title, value) {
-    return `
-      <div class="metric">
-        <span>${escapeHTML(title)}</span>
-        <strong>${value}</strong>
-      </div>
-    `;
-  }
-
-  const bb = result.bollinger;
-  const fib = result.levels.fibonacci;
-  const volume = result.volume;
-  const macd = result.macd;
-
-  box.className = "analysis-result";
-
-  box.innerHTML = `
-    <div class="signal-banner">
-
-      <p class="eyebrow">
-        ${escapeHTML(symbol)} ·
-        ${escapeHTML(interval)} ·
-        ${escapeHTML(market.toUpperCase())}
-      </p>
-
-      <h3 class="${signalClass}">
-        ${result.signal}
-      </h3>
-
-      <p>
-        Reference price: $${money(result.price)}
-      </p>
-
-      <p class="muted-note">
-        Last completed candle:
-        ${new Date(candleInfo.lastCandleClose).toLocaleString()}
-      </p>
-
-      <p class="muted-note">
-        Bullish factors: ${result.bullish} |
-        Bearish factors: ${result.bearish}
-      </p>
-
-      <p class="muted-note">
-        Evidence:
-        ${result.evidence.map(escapeHTML).join(" · ") ||
-          "No directional evidence"}
-      </p>
-
-    </div>
-
-    <h3>Momentum and trend</h3>
-
-    <div class="metrics">
-      ${metric("RSI (14)", result.rsi?.toFixed(2) ?? "N/A")}
-      ${metric("EMA 20", money(result.ema20))}
-      ${metric("EMA 50", money(result.ema50))}
-      ${metric("EMA 200", money(result.ema200))}
-      ${metric("MACD line", money(macd?.line))}
-      ${metric("MACD signal", money(macd?.signal))}
-      ${metric("MACD histogram", money(macd?.histogram))}
-      ${metric("ADX (14)", money(result.adx))}
-      ${metric("ATR (14)", money(result.atr))}
-      ${metric("Candlestick", escapeHTML(result.pattern))}
-    </div>
-
-    <h3>Volatility and volume</h3>
-
-    <div class="metrics">
-      ${metric("Bollinger upper", money(bb?.upper))}
-      ${metric("Bollinger middle", money(bb?.middle))}
-      ${metric("Bollinger lower", money(bb?.lower))}
-      ${metric("Current volume", money(volume?.current))}
-      ${metric("Previous 20-candle average", money(volume?.average))}
-      ${metric("Volume ratio", volume?.ratio?.toFixed(2) ?? "N/A")}
-    </div>
-
-    <h3>Market structure · 100-candle swing range</h3>
-
-    <div class="metrics">
-      ${metric("Support / swing low", "$" + money(result.levels.support))}
-      ${metric("Resistance / swing high", "$" + money(result.levels.resistance))}
-      ${metric("Fib 23.6%", money(fib?.level236))}
-      ${metric("Fib 38.2%", money(fib?.level382))}
-      ${metric("Fib 50%", money(fib?.level500))}
-      ${metric("Fib 61.8%", money(fib?.level618))}
-      ${metric("Fib 78.6%", money(fib?.level786))}
-    </div>
-
-    <h3>Trade planning references</h3>
-
-    ${
-      result.signal === "WAIT"
-        ? `<p class="muted-note">
-             No valid trade setup. Entry, stop loss and targets
-             are intentionally not provided.
-           </p>`
-        : `
-          <div class="metrics">
-            ${metric("Entry reference", "$" + money(result.price))}
-            ${metric("Stop loss", "$" + money(result.stopLoss))}
-            ${metric("Take profit 1", "$" + money(result.takeProfit1))}
-            ${metric("Take profit 2", "$" + money(result.takeProfit2))}
-            ${metric("Take profit 3", "$" + money(result.takeProfit3))}
-            ${metric("Stop distance", "$" + money(result.riskDistance))}
-            ${metric("Reward / risk to TP1", "1 : 1")}
-          </div>
-        `
-    }
-
-    <p class="disclaimer">
-      Completed-candle technical analysis only.
-      Estimates are not guaranteed predictions.
-      No backtested win rate is claimed.
-      This tool does not place trades.
-    </p>
+/* MARKET WATCH */
+
+function showMarkets(items,stamp){
+ let g=$("marketGrid");
+ if(!g)return;
+
+ g.innerHTML=items.map(x=>{
+  let ch=Number(x.priceChangePercent);
+  let up=ch>=0;
+
+  return `
+   <article class="market-card">
+    <div class="coin">${esc(x.symbol.replace("USDT",""))}</div>
+    <span class="price">$${money(Number(x.lastPrice))}</span>
+    <span class="${up?"positive":"negative"}">
+     ${up?"+":""}${ch.toFixed(2)}%
+    </span>
+    <div class="muted-note">24-hour change</div>
+   </article>
   `;
+ }).join("")+(stamp?
+ `<p class="muted-note">
+ Cached snapshot: ${new Date(stamp).toLocaleString()}
+ — NOT live prices.
+ </p>`:"");
 }
 
+async function loadMarkets(){
+ let g=$("marketGrid");
+ if(!g)return;
 
-/* =========================================
-   FREE ANALYSIS CREDITS
-========================================= */
+ try{
+  let d=await request(url(API.spot,"/ticker/24hr"));
 
-function getCredits() {
-  let value = localStorage.getItem(CREDIT);
+  if(!Array.isArray(d))throw Error("Unexpected API response");
 
-  if (value === null) return 4;
+  let a=d.filter(x=>ASSETS.includes(x.symbol))
+   .sort((x,y)=>ASSETS.indexOf(x.symbol)-ASSETS.indexOf(y.symbol));
 
-  value = Number(value);
+  if(a.length!==ASSETS.length)
+   throw Error("Incomplete market response");
 
-  return Number.isFinite(value)
-    ? Math.max(0, Math.min(4, Math.floor(value)))
-    : 4;
-}
+  showMarkets(a);
 
-function updateCredits() {
-  const element = $("credits");
+  localStorage.setItem(MC,JSON.stringify(a));
+  localStorage.setItem(MT,String(Date.now()));
 
-  if (element) {
-    element.textContent = getCredits() + " / 4";
+  connection("live","Live prices received "+new Date().toLocaleString());
+
+ }catch(e){
+  console.warn(e);
+
+  let a=readJSON(MC,null);
+  let t=Number(localStorage.getItem(MT))||null;
+
+  if(a?.length){
+   showMarkets(a,t);
+   connection("cached","Cached only. "+e.message);
+  }else{
+   g.innerHTML=`<p class="muted-note">
+    Market data unavailable: ${esc(e.message)}
+   </p>`;
+   connection("offline",e.message);
   }
+ }
 }
 
+/* CANDLE DATA */
 
-/* =========================================
-   RUN ANALYSIS
-========================================= */
+function convert(raw){
+ if(!Array.isArray(raw))throw Error("Invalid candle response");
 
-async function runAnalysis(isAlert = false) {
-  if (!isAlert && getCredits() <= 0) {
-    toast("Your free analysis allowance has been used.");
-    return null;
+ return raw.map(c=>({
+  time:+c[0],
+  open:+c[1],
+  high:+c[2],
+  low:+c[3],
+  close:+c[4],
+  volume:+c[5],
+  closeTime:+c[6]
+ })).filter(c=>
+  Object.values(c).every(Number.isFinite)&&
+  c.high>=c.low
+ );
+}
+
+function aggregate(a,ms){
+ let map=new Map();
+
+ for(let c of a){
+  let t=Math.floor(c.time/ms)*ms;
+  let g=map.get(t);
+
+  if(!g){
+   map.set(t,{
+    time:t,
+    open:c.open,
+    high:c.high,
+    low:c.low,
+    close:c.close,
+    volume:c.volume,
+    closeTime:t+ms-1
+   });
+  }else{
+   g.high=Math.max(g.high,c.high);
+   g.low=Math.min(g.low,c.low);
+   g.close=c.close;
+   g.volume+=c.volume;
+  }
+ }
+
+ return [...map.values()].sort((a,b)=>a.time-b.time);
+}
+
+async function getCandles(symbol,interval,market){
+ let cfg=TF[interval];
+
+ if(!cfg)throw Error("Unsupported timeframe "+interval);
+
+ let raw=await marketReq(market,"/klines",{
+  symbol,
+  interval:cfg.native||cfg.base,
+  limit:"500"
+ });
+
+ let a=convert(raw);
+
+ if(cfg.base)a=aggregate(a,cfg.ms);
+
+ let now=Date.now();
+
+ a=a.filter(c=>c.closeTime<now).slice(-400);
+
+ let min=interval==="1w"?200:220;
+
+ if(a.length<min){
+  throw Error(
+   `Insufficient completed candles for ${interval}: ${a.length}; need ${min}.`
+  );
+ }
+
+ let last=a.at(-1);
+ let age=now-last.closeTime;
+
+ if(age>cfg.ms*2.2){
+  throw Error("Latest completed candle is stale; analysis stopped.");
+ }
+
+ return{
+  candles:a,
+  lastCandleClose:last.closeTime,
+  age
+ };
+}
+
+/* INDICATORS */
+
+function sma(a,n){
+ if(a.length<n)return null;
+ return a.slice(-n).reduce((x,y)=>x+y,0)/n;
+}
+
+function ema(a,n){
+ if(a.length<n)return null;
+
+ let v=a.slice(0,n).reduce((x,y)=>x+y,0)/n;
+ let k=2/(n+1);
+
+ for(let i=n;i<a.length;i++){
+  v+=(a[i]-v)*k;
+ }
+
+ return v;
+}
+
+function rsi(a,n=14){
+ if(a.length<=n)return null;
+
+ let g=0,l=0;
+
+ for(let i=1;i<=n;i++){
+  let d=a[i]-a[i-1];
+  g+=Math.max(d,0);
+  l+=Math.max(-d,0);
+ }
+
+ g/=n;
+ l/=n;
+
+ for(let i=n+1;i<a.length;i++){
+  let d=a[i]-a[i-1];
+
+  g=(g*(n-1)+Math.max(d,0))/n;
+  l=(l*(n-1)+Math.max(-d,0))/n;
+ }
+
+ return l===0?
+  (g===0?50:100):
+  100-100/(1+g/l);
+}
+
+function macd(a){
+ let series=[];
+
+ for(let i=26;i<=a.length;i++){
+  let p=a.slice(0,i);
+  series.push(ema(p,12)-ema(p,26));
+ }
+
+ if(series.length<9)return null;
+
+ let line=series.at(-1);
+ let signal=ema(series,9);
+
+ return{
+  line,
+  signal,
+  histogram:line-signal
+ };
+}
+
+function atr(a,n=14){
+ let tr=[];
+
+ for(let i=1;i<a.length;i++){
+  let c=a[i],p=a[i-1];
+
+  tr.push(Math.max(
+   c.high-c.low,
+   Math.abs(c.high-p.close),
+   Math.abs(c.low-p.close)
+  ));
+ }
+
+ if(tr.length<n)return null;
+
+ let v=tr.slice(0,n).reduce((x,y)=>x+y,0)/n;
+
+ for(let i=n;i<tr.length;i++){
+  v=(v*(n-1)+tr[i])/n;
+ }
+
+ return v;
+}
+
+function adx(a,n=14){
+ if(a.length<2*n+2)return null;
+
+ let tr=[],pd=[],md=[];
+
+ for(let i=1;i<a.length;i++){
+  let c=a[i],p=a[i-1];
+  let u=c.high-p.high;
+  let d=p.low-c.low;
+
+  tr.push(Math.max(
+   c.high-c.low,
+   Math.abs(c.high-p.close),
+   Math.abs(c.low-p.close)
+  ));
+
+  pd.push(u>d&&u>0?u:0);
+  md.push(d>u&&d>0?d:0);
+ }
+
+ let ts=tr.slice(0,n).reduce((x,y)=>x+y,0);
+ let ps=pd.slice(0,n).reduce((x,y)=>x+y,0);
+ let ms=md.slice(0,n).reduce((x,y)=>x+y,0);
+
+ let dx=[];
+
+ for(let i=n;i<tr.length;i++){
+  if(i>n){
+   ts=ts-ts/n+tr[i];
+   ps=ps-ps/n+pd[i];
+   ms=ms-ms/n+md[i];
   }
 
-  const symbol = isAlert
-    ? $("alertSymbol")?.value
-    : $("symbol")?.value;
+  if(ts<=0)continue;
 
-  const interval = isAlert
-    ? $("alertInterval")?.value
-    : $("interval")?.value;
+  let p=100*ps/ts;
+  let m=100*ms/ts;
 
-  const market = isAlert
-    ? "spot"
-    : $("marketType")?.value;
+  dx.push(p+m?100*Math.abs(p-m)/(p+m):0);
+ }
 
-  if (!symbol || !TF[interval]) {
-    if (!isAlert) {
-      toast("Select a valid asset and timeframe.");
+ if(dx.length<n)return null;
+
+ let v=dx.slice(0,n).reduce((x,y)=>x+y,0)/n;
+
+ for(let i=n;i<dx.length;i++){
+  v=(v*(n-1)+dx[i])/n;
+ }
+
+ return v;
+}
+
+function boll(a,n=20){
+ if(a.length<n)return null;
+
+ let m=sma(a,n);
+ let v=a.slice(-n).reduce((s,x)=>s+(x-m)**2,0)/n;
+ let d=Math.sqrt(v);
+
+ return{
+  upper:m+2*d,
+  middle:m,
+  lower:m-2*d
+ };
+}
+
+function levels(a){
+ let x=a.slice(-100);
+
+ let lo=Math.min(...x.map(c=>c.low));
+ let hi=Math.max(...x.map(c=>c.high));
+ let r=hi-lo;
+
+ return{
+  support:lo,
+  resistance:hi,
+  fib:r>0?{
+   level236:hi-r*.236,
+   level382:hi-r*.382,
+   level500:hi-r*.5,
+   level618:hi-r*.618,
+   level786:hi-r*.786
+  }:null
+ };
+}
+
+function pattern(a){
+ let c=a.at(-1),p=a.at(-2);
+ let b=Math.abs(c.close-c.open);
+ let r=c.high-c.low;
+
+ if(r<=0)return "No clear pattern";
+
+ let u=c.high-Math.max(c.open,c.close);
+ let l=Math.min(c.open,c.close)-c.low;
+
+ if(p.close<p.open&&c.close>c.open&&
+ c.close>=p.open&&c.open<=p.close)
+  return "Bullish engulfing";
+
+ if(p.close>p.open&&c.close<p.open&&
+ c.close<=p.open&&c.open>=p.close)
+  return "Bearish engulfing";
+
+ if(b/r<.1)return "Doji";
+ if(l>b*2&&u<b)return "Hammer-like candle";
+ if(u>b*2&&l<b)return "Shooting-star-like candle";
+
+ return "No clear pattern";
+}
+
+function volume(a){
+ let v=a.map(c=>c.volume);
+ let avg=sma(v.slice(-21,-1),20);
+ let cur=v.at(-1);
+
+ return{
+  current:cur,
+  average:avg,
+  ratio:avg>0?cur/avg:null
+ };
+}
+
+/* V3.1 SIGNAL ENGINE */
+
+function analyze(a){
+
+ const c=a.map(x=>x.close);
+ const price=c.at(-1);
+
+ const R=rsi(c);
+ const e20=ema(c,20);
+ const e50=ema(c,50);
+ const e200=ema(c,200);
+
+ const M=macd(c);
+ const A=atr(a);
+ const D=adx(a);
+ const B=boll(c);
+ const L=levels(a);
+ const V=volume(a);
+ const P=pattern(a);
+
+ let bull=0;
+ let bear=0;
+ let evidence=[];
+
+ const add=(side,msg)=>{
+  if(side==="bull")bull++;
+  else bear++;
+
+  evidence.push(msg);
+ };
+
+ /* EMA trend */
+
+ if(e20!==null&&e50!==null){
+  add(
+   e20>e50?"bull":"bear",
+   e20>e50?"EMA20 above EMA50":"EMA20 below EMA50"
+  );
+ }
+
+ if(e50!==null&&e200!==null){
+  add(
+   e50>e200?"bull":"bear",
+   e50>e200?"EMA50 above EMA200":"EMA50 below EMA200"
+  );
+ }
+
+ /* RSI confirmation */
+
+ if(R!==null){
+  if(R>=52&&R<=68){
+   add("bull","RSI bullish range");
+  }else if(R<=48&&R>=32){
+   add("bear","RSI bearish range");
+  }else{
+   evidence.push("RSI neutral or extended");
+  }
+ }
+
+ /* MACD confirmation */
+
+ if(M){
+  if(M.histogram>0){
+   add("bull","MACD histogram positive");
+  }else if(M.histogram<0){
+   add("bear","MACD histogram negative");
+  }else{
+   evidence.push("MACD histogram flat");
+  }
+ }
+
+ /* Price position */
+
+ if(e20!==null){
+  add(
+   price>e20?"bull":"bear",
+   price>e20?"Price above EMA20":"Price below EMA20"
+  );
+ }
+
+ /* Candlestick confirmation */
+
+ if(P==="Bullish engulfing")add("bull",P);
+ if(P==="Bearish engulfing")add("bear",P);
+
+ /* Volume confirmation */
+
+ if(V?.ratio!==null&&V?.ratio!==undefined){
+
+  if(V.ratio>=1.0){
+   evidence.push("Volume confirms participation (≥1.00× average)");
+  }else{
+   evidence.push("Volume below average; confirmation missing");
+  }
+ }
+
+ const volumeOK=
+  Number.isFinite(V?.ratio)&&V.ratio>=1.0;
+
+ const macdBull=!!M&&M.histogram>0;
+ const macdBear=!!M&&M.histogram<0;
+
+ const trendBull=
+  e20!==null&&e50!==null&&e200!==null&&
+  e20>e50&&e50>e200&&price>e20;
+
+ const trendBear=
+  e20!==null&&e50!==null&&e200!==null&&
+  e20<e50&&e50<e200&&price<e20;
+
+ /* Signal decision */
+
+ let signal="WAIT";
+ let reason="";
+
+ if(D===null||D<18){
+
+  reason="Trend strength is below the minimum ADX threshold";
+
+ }else if(!volumeOK){
+
+  reason="Volume confirmation is missing (below 1.00× average)";
+
+ }else if(
+  bull>=4&&bull>bear&&trendBull&&
+  macdBull&&R!==null&&R>=52&&R<=68
+ ){
+
+  signal="BUY";
+
+ }else if(
+  bear>=4&&bear>bull&&trendBear&&
+  macdBear&&R!==null&&R>=32&&R<=48
+ ){
+
+  signal="SELL";
+
+ }else{
+
+  reason="Trend, momentum and directional evidence are not sufficiently aligned";
+ }
+
+ /* ATR risk and market-structure-aware targets */
+
+ let sl=null;
+ let t1=null;
+ let t2=null;
+ let t3=null;
+ let dist=null;
+ let rr=null;
+ let structureNote="";
+
+ if(signal!=="WAIT"){
+
+  dist=A*1.5;
+  const pct=dist/price;
+
+  if(!Number.isFinite(dist)||dist<=0||pct<.001||pct>.15){
+
+   signal="WAIT";
+   reason="Setup rejected: stop distance outside safety limits";
+
+  }else{
+
+   const risk=dist;
+   const buffer=A*.15;
+
+   if(signal==="BUY"){
+
+    const room=L.resistance-price;
+
+    if(room<=buffer){
+
+     signal="WAIT";
+     reason="Nearby resistance leaves insufficient upside room";
+
+    }else{
+
+     const cap=L.resistance-buffer;
+
+     t1=Math.min(price+risk,cap);
+     t2=Math.min(price+risk*2.5,cap);
+     t3=Math.min(price+risk*3.5,cap);
+
+     rr=(t1-price)/risk;
+
+     if(rr<1.2){
+
+      signal="WAIT";
+      reason="Resistance limits the first target below 1.2R";
+
+     }else{
+
+      sl=price-risk;
+      structureNote=
+       "Targets capped below the 100-candle resistance zone.";
+
+     }
     }
 
-    return null;
-  }
+   }else{
 
-  const button = $("analyzeBtn");
+    const room=price-L.support;
 
-  if (!isAlert && button) {
-    button.disabled = true;
-    button.textContent = "Analyzing…";
-  }
+    if(room<=buffer){
 
-  try {
-    const candleInfo = await getCandles(
-      symbol,
-      interval,
-      market
-    );
+     signal="WAIT";
+     reason="Nearby support leaves insufficient downside room";
 
-    const result = analyzeCandles(
-      candleInfo.candles
-    );
+    }else{
 
-    if (!isAlert) {
-      localStorage.setItem(
-        CREDIT,
-        String(Math.max(0, getCredits() - 1))
-      );
+     const floor=L.support+buffer;
 
-      updateCredits();
+     t1=Math.max(price-risk,floor);
+     t2=Math.max(price-risk*2.5,floor);
+     t3=Math.max(price-risk*3.5,floor);
 
-      displayAnalysis(
-        result,
-        symbol,
-        interval,
-        market,
-        candleInfo
-      );
+     rr=(price-t1)/risk;
+
+     if(rr<1.2){
+
+      signal="WAIT";
+      reason="Support limits the first target below 1.2R";
+
+     }else{
+
+      sl=price+risk;
+      structureNote=
+       "Targets capped above the 100-candle support zone.";
+
+     }
     }
-
-    return {
-      ...result,
-      candleInfo
-    };
-
-  } catch (error) {
-    console.error("Analysis error:", error);
-
-    if (!isAlert) {
-      const box = $("analysisResult");
-
-      if (box) {
-        box.className = "analysis-empty";
-        box.textContent =
-          "Analysis stopped: " + error.message;
-      }
-    }
-
-    return null;
-
-  } finally {
-    if (!isAlert && button) {
-      button.disabled = false;
-      button.textContent = "Analyze market";
-    }
+   }
   }
+ }
+
+ if(signal==="WAIT"){
+
+  sl=t1=t2=t3=dist=rr=null;
+
+  if(reason)evidence.push("WAIT: "+reason);
+ }
+
+ return{
+  price,signal,bull,bear,
+  rsi:R,
+  ema20:e20,
+  ema50:e50,
+  ema200:e200,
+  macd:M,
+  atr:A,
+  adx:D,
+  boll:B,
+  levels:L,
+  volume:V,
+  pattern:P,
+  sl,t1,t2,t3,dist,rr,
+  evidence,
+  reason,
+  structureNote
+ };
 }
 
+/* RESULT RENDERING */
 
-/* =========================================
-   SOUND AND NOTIFICATIONS
-========================================= */
+function display(r,symbol,interval,market,info){
 
-function playAlertSound() {
-  try {
-    const AudioContextClass =
-      window.AudioContext || window.webkitAudioContext;
+ let box=$("analysisResult");
+ if(!box)return;
 
-    if (!AudioContextClass) return;
+ let cls=r.signal==="BUY"?"signal-buy":
+ r.signal==="SELL"?"signal-sell":"signal-wait";
 
-    const context = new AudioContextClass();
+ let metric=(t,v)=>
+ `<div class="metric"><span>${esc(t)}</span><strong>${v}</strong></div>`;
 
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
+ let f=r.levels.fib;
+ let b=r.boll;
+ let m=r.macd;
+ let v=r.volume;
 
-    oscillator.connect(gain);
-    gain.connect(context.destination);
+ box.className="analysis-result";
 
-    oscillator.frequency.value = 880;
-    gain.gain.value = 0.12;
+ box.innerHTML=`
 
-    oscillator.start();
+ <div class="signal-banner">
 
-    setTimeout(() => {
-      oscillator.stop();
-      context.close();
-    }, 300);
+  <p class="eyebrow">
+   ${esc(symbol)} · ${esc(interval)} · ${esc(market.toUpperCase())}
+  </p>
 
-  } catch (error) {
-    console.warn("Alert sound unavailable:", error);
-  }
+  <h3 class="${cls}">${r.signal}</h3>
+
+  <p>Reference price: $${money(r.price)}</p>
+
+  <p class="muted-note">
+   Last completed candle:
+   ${new Date(info.lastCandleClose).toLocaleString()}
+  </p>
+
+  <p class="muted-note">
+   Bullish factors: ${r.bull} | Bearish factors: ${r.bear}
+  </p>
+
+  <p class="muted-note">
+   Evidence: ${r.evidence.map(esc).join(" · ")||"No directional evidence"}
+  </p>
+
+ </div>
+
+ <h3>Momentum and trend</h3>
+
+ <div class="metrics">
+
+  ${metric("RSI (14)",r.rsi?.toFixed(2)??"N/A")}
+  ${metric("EMA 20",money(r.ema20))}
+  ${metric("EMA 50",money(r.ema50))}
+  ${metric("EMA 200",money(r.ema200))}
+  ${metric("MACD line",money(m?.line))}
+  ${metric("MACD signal",money(m?.signal))}
+  ${metric("MACD histogram",money(m?.histogram))}
+  ${metric("ADX (14)",money(r.adx))}
+  ${metric("ATR (14)",money(r.atr))}
+  ${metric("Candlestick",esc(r.pattern))}
+
+ </div>
+
+ <h3>Volatility and volume</h3>
+
+ <div class="metrics">
+
+  ${metric("Bollinger upper",money(b?.upper))}
+  ${metric("Bollinger middle",money(b?.middle))}
+  ${metric("Bollinger lower",money(b?.lower))}
+  ${metric("Current volume",money(v?.current))}
+  ${metric("Previous 20-candle average",money(v?.average))}
+  ${metric("Volume ratio",v?.ratio?.toFixed(2)??"N/A")}
+
+ </div>
+
+ <h3>Market structure · 100-candle swing range</h3>
+
+ <div class="metrics">
+
+  ${metric("Support / swing low","$"+money(r.levels.support))}
+  ${metric("Resistance / swing high","$"+money(r.levels.resistance))}
+  ${metric("Fib 23.6%",money(f?.level236))}
+  ${metric("Fib 38.2%",money(f?.level382))}
+  ${metric("Fib 50%",money(f?.level500))}
+  ${metric("Fib 61.8%",money(f?.level618))}
+  ${metric("Fib 78.6%",money(f?.level786))}
+
+ </div>
+
+ <h3>Trade planning references</h3>
+
+ ${
+  r.signal==="WAIT"?
+  '<p class="muted-note">No valid trade setup. Entry, stop loss and targets are intentionally not provided.</p>'
+  :
+  `
+   <div class="metrics">
+
+    ${metric("Entry reference","$"+money(r.price))}
+    ${metric("Stop loss","$"+money(r.sl))}
+    ${metric("Take profit 1","$"+money(r.t1))}
+    ${metric("Take profit 2","$"+money(r.t2))}
+    ${metric("Take profit 3","$"+money(r.t3))}
+    ${metric("Stop distance","$"+money(r.dist))}
+    ${metric("Reward / risk to TP1",r.rr?.toFixed(2)+" : 1")}
+
+   </div>
+
+   ${r.structureNote?
+   `<p class="muted-note">${esc(r.structureNote)}</p>`:""}
+  `
+ }
+
+ <p class="disclaimer">
+ Completed-candle technical analysis only.
+ Estimates are not guaranteed predictions.
+ No backtested win rate is claimed.
+ This tool does not place trades.
+ </p>
+
+ <p class="disclaimer">
+ Educational market analysis only. Not financial advice.
+ Crypto trading can result in substantial losses.
+ Never risk money you cannot afford to lose.
+ </p>
+
+ `;
 }
 
-async function enableNotifications() {
-  if (!("Notification" in window)) {
-    toast("Notifications are not supported.");
-    return;
-  }
+/* FREE ANALYSES */
 
-  try {
-    const permission =
-      await Notification.requestPermission();
+function credits(){
+ let n=localStorage.getItem(CREDIT);
 
-    toast(
-      permission === "granted"
-        ? "Browser notifications enabled."
-        : "Notification permission not granted."
-    );
+ if(n===null)return 4;
 
-  } catch (_) {
-    toast("Could not request notification permission.");
-  }
+ n=Number(n);
+
+ return Number.isFinite(n)?
+ Math.max(0,Math.min(4,Math.floor(n))):4;
 }
 
-
-/* =========================================
-   ALERT HISTORY
-========================================= */
-
-function renderStoredAlerts() {
-  const log = $("alertLog");
-
-  if (!log) return;
-
-  const entries = readJSON(LK, []);
-
-  if (!entries.length) return;
-
-  log.innerHTML = "";
-
-  entries.slice(0, 10).forEach(entry => {
-    const item = document.createElement("div");
-
-    item.className = "alert-item";
-    item.textContent = entry;
-
-    log.appendChild(item);
-  });
+function updateCredits(){
+ let e=$("credits");
+ if(e)e.textContent=credits()+" / 4";
 }
 
-function sendAlert(symbol, interval, signal, price) {
-  const message =
-    symbol + " " + signal +
-    " on " + interval +
-    " near $" + money(price);
+async function runAnalysis(alert=false){
 
-  playAlertSound();
+ if(!alert&&credits()<=0){
+  toast("Your free analysis allowance has been used.");
+  return null;
+ }
 
-  if (
-    "Notification" in window &&
-    Notification.permission === "granted"
-  ) {
-    try {
-      new Notification("AGU Crypto Analyzer", {
-        body: message
-      });
+ let symbol=alert?
+ $("alertSymbol")?.value:
+ $("symbol")?.value;
 
-    } catch (error) {
-      console.warn("Notification error:", error);
-    }
+ let interval=alert?
+ $("alertInterval")?.value:
+ $("interval")?.value;
+
+ let market=alert?"spot":$("marketType")?.value;
+
+ if(!symbol||!TF[interval]){
+  if(!alert)toast("Select a valid asset and timeframe.");
+  return null;
+ }
+
+ let btn=$("analyzeBtn");
+
+ if(!alert&&btn){
+  btn.disabled=true;
+  btn.textContent="Analyzing…";
+ }
+
+ try{
+
+  let info=await getCandles(symbol,interval,market);
+  let r=analyze(info.candles);
+
+  if(!alert){
+   localStorage.setItem(CREDIT,String(Math.max(0,credits()-1)));
+   updateCredits();
+   display(r,symbol,interval,market,info);
   }
 
-  const entry =
-    new Date().toLocaleString() + " — " + message;
+  return{...r,info};
 
-  const entries = readJSON(LK, []);
+ }catch(e){
 
-  entries.unshift(entry);
+  console.error(e);
 
-  localStorage.setItem(
-    LK,
-    JSON.stringify(entries.slice(0, 10))
+  if(!alert){
+   let box=$("analysisResult");
+
+   if(box){
+    box.className="analysis-empty";
+    box.textContent="Analysis stopped: "+e.message;
+   }
+  }
+
+  return null;
+
+ }finally{
+
+  if(!alert&&btn){
+   btn.disabled=false;
+   btn.textContent="Analyze market";
+  }
+ }
+}
+
+/* SMART ALERTS */
+
+function sound(){
+
+ try{
+
+  let C=window.AudioContext||window.webkitAudioContext;
+  if(!C)return;
+
+  let c=new C();
+  let o=c.createOscillator();
+  let g=c.createGain();
+
+  o.connect(g);
+  g.connect(c.destination);
+
+  o.frequency.value=880;
+  g.gain.value=.12;
+
+  o.start();
+
+  setTimeout(()=>{
+   o.stop();
+   c.close();
+  },300);
+
+ }catch(e){
+  console.warn(e);
+ }
+}
+
+async function enableNotifications(){
+
+ if(!("Notification"in window)){
+  toast("Notifications are not supported.");
+  return;
+ }
+
+ try{
+
+  let p=await Notification.requestPermission();
+
+  toast(
+   p==="granted"?
+   "Browser notifications enabled.":
+   "Notification permission not granted."
   );
 
-  const log = $("alertLog");
-
-  if (log) {
-    if (log.querySelector(".muted-note")) {
-      log.innerHTML = "";
-    }
-
-    const item = document.createElement("div");
-
-    item.className = "alert-item";
-    item.textContent = entry;
-
-    log.prepend(item);
-
-    while (log.children.length > 10) {
-      log.lastElementChild.remove();
-    }
-  }
+ }catch(_){
+  toast("Could not request notification permission.");
+ }
 }
 
+function alertLog(){
 
-/* =========================================
-   SMART MONITORING
-========================================= */
+ let log=$("alertLog");
+ if(!log)return;
 
-async function monitorMarket() {
-  if (!monitoring || alertBusy) return;
+ let entries=readJSON(LK,[]);
 
-  alertBusy = true;
+ if(!entries.length)return;
 
-  try {
-    const symbol = $("alertSymbol")?.value;
-    const interval = $("alertInterval")?.value;
+ log.innerHTML="";
 
-    const result = await runAnalysis(true);
-
-    if (!result) return;
-
-    const key = symbol + "_" + interval;
-
-    if (result.signal !== "WAIT") {
-      const state =
-        result.signal + "_" +
-        result.candleInfo.lastCandleClose;
-
-      if (lastAlert[key] !== state) {
-        sendAlert(
-          symbol,
-          interval,
-          result.signal,
-          result.price
-        );
-
-        lastAlert[key] = state;
-
-        localStorage.setItem(
-          AK,
-          JSON.stringify(lastAlert)
-        );
-      }
-    }
-
-    const status = $("alertStatus");
-
-    if (status) {
-      status.textContent =
-        "Monitoring active. Last completed candle checked: " +
-        new Date(
-          result.candleInfo.lastCandleClose
-        ).toLocaleString() + ".";
-    }
-
-  } catch (error) {
-    console.warn("Monitoring error:", error);
-
-  } finally {
-    alertBusy = false;
-  }
+ entries.slice(0,10).forEach(x=>{
+  let d=document.createElement("div");
+  d.className="alert-item";
+  d.textContent=x;
+  log.appendChild(d);
+ });
 }
 
-function startMonitoring() {
-  const button = $("monitorBtn");
-  const status = $("alertStatus");
+function sendAlert(s,t,signal,p){
 
-  if (monitoring) {
-    monitoring = false;
+ let msg=s+" "+signal+" on "+t+" near $"+money(p);
 
-    clearInterval(monitorTimer);
-    monitorTimer = null;
+ sound();
 
-    if (button) {
-      button.textContent = "Start monitoring";
-    }
+ if("Notification"in window&&Notification.permission==="granted"){
 
-    if (status) {
-      status.textContent = "Monitoring is off.";
-    }
-
-    return;
+  try{
+   new Notification("AGU Crypto Analyzer",{body:msg});
+  }catch(e){
+   console.warn(e);
   }
+ }
 
-  monitoring = true;
+ let entry=new Date().toLocaleString()+" — "+msg;
 
-  if (button) {
-    button.textContent = "Stop monitoring";
-  }
+ let items=readJSON(LK,[]);
 
-  if (status) {
-    status.textContent =
-      "Monitoring every 60 seconds while this page remains open. " +
-      "Fresh completed candles required.";
-  }
+ items.unshift(entry);
 
-  monitorMarket();
+ localStorage.setItem(LK,JSON.stringify(items.slice(0,10)));
 
-  monitorTimer = setInterval(
-    monitorMarket,
-    60000
-  );
+ let log=$("alertLog");
+
+ if(log){
+
+  if(log.querySelector(".muted-note"))log.innerHTML="";
+
+  let d=document.createElement("div");
+  d.className="alert-item";
+  d.textContent=entry;
+
+  log.prepend(d);
+
+  while(log.children.length>10)
+   log.lastElementChild.remove();
+ }
 }
 
+async function monitor(){
 
-/* =========================================
-   NETWORK STATUS
-========================================= */
+ if(!monitoring||alertBusy)return;
 
-window.addEventListener("online", loadMarkets);
+ alertBusy=true;
 
-window.addEventListener("offline", () => {
-  setConnection(
-    "offline",
-    "Browser reports no internet connection."
-  );
+ try{
+
+  let s=$("alertSymbol")?.value;
+  let t=$("alertInterval")?.value;
+
+  let r=await runAnalysis(true);
+
+  if(!r)return;
+
+  let key=s+"_"+t;
+
+  if(r.signal!=="WAIT"){
+
+   let state=r.signal+"_"+r.info.lastCandleClose;
+
+   if(lastAlert[key]!==state){
+
+    sendAlert(s,t,r.signal,r.price);
+
+    lastAlert[key]=state;
+
+    localStorage.setItem(AK,JSON.stringify(lastAlert));
+   }
+  }
+
+  let status=$("alertStatus");
+
+  if(status){
+   status.textContent=
+   "Monitoring active. Last completed candle checked: "+
+   new Date(r.info.lastCandleClose).toLocaleString()+".";
+  }
+
+ }catch(e){
+  console.warn("Monitor:",e);
+
+ }finally{
+  alertBusy=false;
+ }
+}
+
+function startMonitoring(){
+
+ let b=$("monitorBtn");
+ let s=$("alertStatus");
+
+ if(monitoring){
+
+  monitoring=false;
+
+  clearInterval(monitorTimer);
+  monitorTimer=null;
+
+  if(b)b.textContent="Start monitoring";
+  if(s)s.textContent="Monitoring is off.";
+
+  return;
+ }
+
+ monitoring=true;
+
+ if(b)b.textContent="Stop monitoring";
+
+ if(s){
+  s.textContent=
+  "Monitoring every 60 seconds while this page remains open. Fresh completed candles required.";
+ }
+
+ monitor();
+
+ monitorTimer=setInterval(monitor,60000);
+}
+
+/* INITIALIZATION */
+
+window.addEventListener("online",loadMarkets);
+
+window.addEventListener("offline",()=>{
+ connection("offline","Browser reports no internet connection.");
 });
 
+document.addEventListener("DOMContentLoaded",()=>{
 
-/* =========================================
-   INITIALIZATION
-========================================= */
+ let y=$("year");
 
-document.addEventListener("DOMContentLoaded", () => {
-  const year = $("year");
+ if(y)y.textContent=new Date().getFullYear();
 
-  if (year) {
-    year.textContent = new Date().getFullYear();
-  }
+ updateCredits();
+ alertLog();
+ loadMarkets();
 
-  updateCredits();
+ $("refreshBtn")?.addEventListener("click",loadMarkets);
 
-  renderStoredAlerts();
+ $("analyzeBtn")?.addEventListener("click",()=>runAnalysis(false));
 
-  loadMarkets();
+ $("notifyBtn")?.addEventListener("click",enableNotifications);
 
-  $("refreshBtn")?.addEventListener(
-    "click",
-    loadMarkets
-  );
+ $("monitorBtn")?.addEventListener("click",startMonitoring);
 
-  $("analyzeBtn")?.addEventListener(
-    "click",
-    () => runAnalysis(false)
-  );
+ if("serviceWorker"in navigator){
 
-  $("notifyBtn")?.addEventListener(
-    "click",
-    enableNotifications
-  );
+  navigator.serviceWorker.register("./sw.js")
+  .catch(e=>console.warn("Service worker:",e));
+ }
 
-  $("monitorBtn")?.addEventListener(
-    "click",
-    startMonitoring
-  );
+ setInterval(loadMarkets,60000);
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker
-      .register("./sw.js")
-      .catch(error => {
-        console.warn(
-          "Service worker registration failed:",
-          error
-        );
-      });
-  }
-
-  setInterval(loadMarkets, 60000);
 });
