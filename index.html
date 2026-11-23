@@ -5,16 +5,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#071a2e">
-  <meta name="description" content="AGU Crypto Analyzer — cryptocurrency market intelligence, technical analysis, backtesting and paper trading.">
-  <small>MARKET INTELLIGENCE V3.3</small>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css">
+  <meta name="description" content="AGU Crypto Analyzer — cryptocurrency market intelligence, technical analysis, backtesting and paper trading.">  <title>AGU Crypto Analyzer V3.3</title>  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css?v=3.3">
 </head><body><header class="topbar">
   <a class="brand" href="#">
     <span class="brand-mark">AGU</span>
     <span>
       CRYPTO <b>ANALYZER</b>
-      <small>MARKET INTELLIGENCE V3.2</small>
+      <small>MARKET INTELLIGENCE V3.3</small>
     </span>
   </a>  <div class="top-actions">
     <span id="connection" class="pill muted">Connecting…</span>
@@ -46,16 +44,14 @@
   <div class="loading">Loading market data…</div>
 </div>
 
-  </section>  <!-- ANALYZER -->  <section class="panel analyzer"><div class="section-head">
-  <div>
-    <p class="eyebrow">TECHNICAL ENGINE V3.2</p>
-    <h2>Market analyzer</h2>
-  </div>
-  <span class="pill">Spot + Futures context</span>
-</div>
-
-<div class="controls">
-
+  </section>  <!-- ANALYZER -->  <section class="panel analyzer">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">TECHNICAL ENGINE V3.3</p>
+        <h2>Market analyzer</h2>
+      </div>
+      <span class="pill">Spot + Futures context</span>
+    </div><div class="controls">
   <label>
     Asset
     <select id="symbol">
@@ -95,10 +91,7 @@
     </select>
   </label>
 
-  <button id="analyzeBtn" class="primary" type="button">
-    Analyze market
-  </button>
-
+  <button id="analyzeBtn" class="primary" type="button">Analyze market</button>
 </div>
 
 <div id="analysisResult" class="analysis-empty">
@@ -147,21 +140,19 @@
   Never risk money you cannot afford to lose.
 </p>
 
-  </section>  <!-- BACKTESTING -->  <section class="panel" id="backtesting"><div class="section-head">
-  <div>
-    <p class="eyebrow">HISTORICAL STRATEGY TESTING</p>
-    <h2>Backtesting laboratory</h2>
-  </div>
-  <span class="pill">Historical simulation</span>
-</div>
-
-<p class="muted-note">
+  </section>  <!-- BACKTESTING -->  <section class="panel" id="backtesting">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">HISTORICAL STRATEGY TESTING</p>
+        <h2>Backtesting laboratory</h2>
+      </div>
+      <span class="pill">Historical simulation</span>
+    </div><p class="muted-note">
   Test the strategy against completed historical candles.
   Historical results do not guarantee future performance.
 </p>
 
 <div class="controls">
-
   <label>
     Asset
     <select id="backtestSymbol">
@@ -207,31 +198,26 @@
     </select>
   </label>
 
-  <button id="backtestBtn" class="primary" type="button">
-    Run backtest
-  </button>
-
+  <button id="backtestBtn" class="primary" type="button">Run backtest</button>
 </div>
 
 <div id="backtestResult" class="analysis-empty">
   Backtest results will appear here.
 </div>
 
-  </section>  <!-- PAPER TRADING -->  <section class="panel" id="paperTrading"><div class="section-head">
-  <div>
-    <p class="eyebrow">SIMULATED TRADING</p>
-    <h2>Paper trading account</h2>
-  </div>
-  <span class="pill green">No real money involved</span>
-</div>
-
-<p class="muted-note">
+  </section>  <!-- PAPER TRADING -->  <section class="panel" id="paperTrading">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">SIMULATED TRADING</p>
+        <h2>Paper trading account</h2>
+      </div>
+      <span class="pill green">No real money involved</span>
+    </div><p class="muted-note">
   Practice trading with simulated funds. Paper trades do not connect to
   Binance and do not execute real orders.
 </p>
 
 <div class="metrics">
-
   <div class="metric">
     <span>Virtual balance</span>
     <strong id="paperBalance">$10,000.00</strong>
@@ -251,11 +237,9 @@
     <span>Realized profit/loss</span>
     <strong id="paperPnL">$0.00</strong>
   </div>
-
 </div>
 
 <div class="controls">
-
   <label>
     Asset
     <select id="paperSymbol">
@@ -282,14 +266,10 @@
 
   <label>
     Virtual amount (USDT)
-    <input id="paperAmount" type="number" min="10" max="10000"
-      step="10" value="100">
+    <input id="paperAmount" type="number" min="10" max="10000" step="10" value="100">
   </label>
 
-  <button id="paperOpenBtn" class="primary" type="button">
-    Open simulated trade
-  </button>
-
+  <button id="paperOpenBtn" class="primary" type="button">Open simulated trade</button>
 </div>
 
 <div id="paperStatus" class="muted-note">
@@ -306,20 +286,16 @@
   <p class="muted-note">No simulated trades yet.</p>
 </div>
 
-<button id="paperResetBtn" class="outline" type="button">
-  Reset paper account
-</button>
+<button id="paperResetBtn" class="outline" type="button">Reset paper account</button>
 
-  </section>  <!-- RISK MANAGEMENT -->  <section class="panel" id="riskManagement"><div class="section-head">
-  <div>
-    <p class="eyebrow">CAPITAL PROTECTION</p>
-    <h2>Risk management</h2>
-  </div>
-  <span class="pill gold">Paper trading controls</span>
-</div>
-
-<div class="controls">
-
+  </section>  <!-- RISK MANAGEMENT -->  <section class="panel" id="riskManagement">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">CAPITAL PROTECTION</p>
+        <h2>Risk management</h2>
+      </div>
+      <span class="pill gold">Paper trading controls</span>
+    </div><div class="controls">
   <label>
     Virtual account balance (USDT)
     <input id="riskBalance" type="number" min="100" value="10000">
@@ -343,28 +319,22 @@
     </select>
   </label>
 
-  <button id="saveRiskBtn" class="primary" type="button">
-    Save risk settings
-  </button>
-
+  <button id="saveRiskBtn" class="primary" type="button">Save risk settings</button>
 </div>
 
 <div id="riskResult" class="analysis-empty">
   Configure your simulated trading risk limits.
 </div>
 
-  </section>  <!-- SMART ALERTS AND MEMBERSHIP -->  <section class="two-col"><div class="panel">
-
-  <div class="section-head">
-    <div>
-      <p class="eyebrow">OPPORTUNITY MONITOR</p>
-      <h2>Smart alerts</h2>
-    </div>
-    <span class="pill green">While page is open</span>
-  </div>
-
-  <div class="alert-controls">
-
+  </section>  <!-- SMART ALERTS AND MEMBERSHIP -->  <section class="two-col">
+    <div class="panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">OPPORTUNITY MONITOR</p>
+          <h2>Smart alerts</h2>
+        </div>
+        <span class="pill green">While page is open</span>
+      </div>  <div class="alert-controls">
     <label>
       Watch asset
       <select id="alertSymbol">
@@ -392,10 +362,7 @@
       </select>
     </label>
 
-    <button id="monitorBtn" class="primary" type="button">
-      Start monitoring
-    </button>
-
+    <button id="monitorBtn" class="primary" type="button">Start monitoring</button>
   </div>
 
   <div id="alertStatus" class="muted-note">
@@ -405,11 +372,9 @@
   <div id="alertLog" class="alert-log">
     <p class="muted-note">No alerts yet.</p>
   </div>
-
 </div>
 
 <div class="panel">
-
   <div class="section-head">
     <div>
       <p class="eyebrow">MEMBERSHIP</p>
@@ -418,7 +383,6 @@
   </div>
 
   <div class="plans">
-
     <div class="plan">
       <h3>Free</h3>
       <strong>4 analyses</strong>
@@ -435,32 +399,28 @@
       </p>
       <span class="pill gold">Coming soon</span>
     </div>
-
   </div>
 
   <p class="support">
     Need help with access or payment?<br>
     Email <a href="mailto:support@agulibrary.com">support@agulibrary.com</a><br>
-    <a href="https://wa.me/message/OJTN4XM5YCWWH1"
-      target="_blank" rel="noopener">WhatsApp customer support</a>
+    <a href="https://wa.me/message/OJTN4XM5YCWWH1" target="_blank" rel="noopener">WhatsApp customer support</a>
   </p>
 
   <p class="muted-note">
     Premium payments are not enabled. Do not send money until an
     official payment and verification system is installed.
   </p>
-
 </div>
 
-  </section>  <!-- SECURITY -->  <section class="panel" id="security"><div class="section-head">
-  <div>
-    <p class="eyebrow">SECURITY FIRST</p>
-    <h2>Platform security</h2>
-  </div>
-  <span class="pill gold">Frontend security status</span>
-</div>
-
-<div id="securityStatus" class="analysis-empty">
+  </section>  <!-- SECURITY -->  <section class="panel" id="security">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">SECURITY FIRST</p>
+        <h2>Platform security</h2>
+      </div>
+      <span class="pill gold">Frontend security status</span>
+    </div><div id="securityStatus" class="analysis-empty">
   AGU security foundations are being prepared.
 </div>
 
@@ -482,5 +442,5 @@
     <b>AGU CRYPTO ANALYZER</b>
     <span>Independent project · Owner: Umar Mohammed</span>
     <span>© <span id="year"></span> AGU</span>
-  </footer></main><div id="toast" class="toast" role="status" aria-live="polite"></div><script src="app.js"></script></body>
-  </html>
+  </footer></main><div id="toast" class="toast" role="status" aria-live="polite"></div><script src="app.js?v=3.3"></script></body>
+        </html>
