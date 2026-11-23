@@ -5,7 +5,7 @@
    Safe Application Shell Cache
 ========================================== */
 
-const CACHE_NAME = "agu-crypto-shell-v32";
+const CACHE_NAME = "agu-crypto-shell-v33";
 
 const APP_FILES = [
   "./",
