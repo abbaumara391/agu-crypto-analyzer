@@ -1,18 +1,19 @@
 "use strict";
 
 /* =========================================================
-   AGU CRYPTO ANALYZER V3.2
+   AGU CRYPTO ANALYZER V3.3
    Owner: Umar Mohammed
-   Market data: Binance public market endpoints
 
    SECURITY:
+   - Public Binance market data only.
    - No exchange API secrets.
    - No real order execution.
    - No payment processing.
    - Paper trading is browser-side simulation.
+   - Paper stops require this page to remain active.
 ========================================================= */
 
-const VERSION = "3.2";
+const VERSION = "3.3";
 
 const API = {
   spot: "https://data-api.binance.vision/api/v3",
@@ -58,8 +59,10 @@ const STORE = {
   marketTime: "agu_market_cache_time_v3",
   alerts: "agu_alert_log_v3",
   alertState: "agu_alert_state_v3",
-  paper: "agu_paper_account_v32",
-  risk: "agu_paper_risk_v32"
+  paper: "agu_paper_account_v33",
+  oldPaper: "agu_paper_account_v32",
+  risk: "agu_paper_risk_v33",
+  oldRisk: "agu_paper_risk_v32"
 };
 
 const STARTING_BALANCE = 10000;
@@ -71,14 +74,11 @@ let monitorTimer = null;
 let lastAnalysis = null;
 let lastMarketPrices = {};
 let busyAnalysis = false;
-
-/* =========================================================
-   UTILITIES
-========================================================= */
+let paperPriceTimer = null;
+let paperBusy = false;
 
 function money(value) {
   if (!Number.isFinite(Number(value))) return "N/A";
-
   return "$" + Number(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 6
@@ -87,7 +87,6 @@ function money(value) {
 
 function number(value, digits = 2) {
   if (!Number.isFinite(Number(value))) return "N/A";
-
   return Number(value).toLocaleString("en-US", {
     maximumFractionDigits: digits
   });
@@ -109,7 +108,6 @@ function toast(message) {
 
   el.textContent = message;
   el.classList.add("show");
-
   clearTimeout(toast.timer);
 
   toast.timer = setTimeout(() => {
@@ -187,7 +185,6 @@ async function request(url) {
 
 function applyTheme() {
   const theme = localStorage.getItem(STORE.theme) || "dark";
-
   document.body.dataset.theme = theme;
 
   const button = $("themeBtn");
@@ -206,9 +203,10 @@ function applyTheme() {
 
 function toggleTheme() {
   const current = localStorage.getItem(STORE.theme) || "dark";
-  const next = current === "dark" ? "light" : "dark";
-
-  localStorage.setItem(STORE.theme, next);
+  localStorage.setItem(
+    STORE.theme,
+    current === "dark" ? "light" : "dark"
+  );
   applyTheme();
 }
 
@@ -220,9 +218,7 @@ async function loadMarkets() {
   const grid = $("marketGrid");
 
   try {
-    const data = await request(
-      API.spot + "/ticker/24hr"
-    );
+    const data = await request(API.spot + "/ticker/24hr");
 
     const selected = data
       .filter(item => ASSETS.includes(item.symbol))
@@ -243,12 +239,12 @@ async function loadMarkets() {
 
     renderMarkets(selected);
 
-    const connection = $("connection");
-
-    if (connection) {
-      connection.textContent = "Live market data";
-      connection.className = "pill green";
+    if ($("connection")) {
+      $("connection").textContent = "Live market data";
+      $("connection").className = "pill green";
     }
+
+    renderPaperAccount();
 
   } catch (error) {
     const cached = readJSON(STORE.market, []);
@@ -256,11 +252,9 @@ async function loadMarkets() {
     if (cached.length) {
       renderMarkets(cached, true);
 
-      const connection = $("connection");
-
-      if (connection) {
-        connection.textContent = "Cached snapshot";
-        connection.className = "pill muted";
+      if ($("connection")) {
+        $("connection").textContent = "Cached snapshot";
+        $("connection").className = "pill muted";
       }
     } else if (grid) {
       grid.innerHTML =
@@ -316,10 +310,7 @@ function aggregate10m(candles) {
   candles.forEach(c => {
     const start = Math.floor(c.time / 600000) * 600000;
 
-    if (!groups.has(start)) {
-      groups.set(start, []);
-    }
-
+    if (!groups.has(start)) groups.set(start, []);
     groups.get(start).push(c);
   });
 
@@ -346,13 +337,14 @@ async function getCandles(
   symbol,
   interval,
   market = "spot",
-  limit = 500
+  limit = 500,
+  minimumOverride = null
 ) {
   const config = TF[interval];
-
   if (!config) throw new Error("Unsupported timeframe.");
 
   const sourceInterval = config.source || interval;
+
   const sourceLimit = interval === "10m"
     ? Math.min(1000, limit * 2 + 10)
     : Math.min(1000, limit);
@@ -364,7 +356,6 @@ async function getCandles(
     "&limit=" + sourceLimit;
 
   const raw = await request(url);
-
   let candles = convert(raw);
 
   if (interval === "10m") {
@@ -374,10 +365,10 @@ async function getCandles(
   const now = Date.now();
 
   candles = candles.filter(c => c.closeTime < now);
-
   candles = candles.slice(-limit);
 
-  const minimum = interval === "1w" ? 200 : 220;
+  const minimum = minimumOverride ||
+    (interval === "1w" ? 200 : 220);
 
   if (candles.length < minimum) {
     throw new Error(
@@ -401,16 +392,12 @@ async function getCandles(
 
 function emaSeries(values, period) {
   const result = Array(values.length).fill(null);
-
   if (values.length < period) return result;
 
   const multiplier = 2 / (period + 1);
-
   let sum = 0;
 
-  for (let i = 0; i < period; i++) {
-    sum += values[i];
-  }
+  for (let i = 0; i < period; i++) sum += values[i];
 
   let previous = sum / period;
   result[period - 1] = previous;
@@ -418,7 +405,6 @@ function emaSeries(values, period) {
   for (let i = period; i < values.length; i++) {
     previous =
       (values[i] - previous) * multiplier + previous;
-
     result[i] = previous;
   }
 
@@ -434,7 +420,6 @@ function sma(values, period) {
   if (values.length < period) return null;
 
   const part = values.slice(-period);
-
   return part.reduce((a, b) => a + b, 0) / period;
 }
 
@@ -446,7 +431,6 @@ function rsi(values, period = 14) {
 
   for (let i = 1; i <= period; i++) {
     const diff = values[i] - values[i - 1];
-
     if (diff > 0) gain += diff;
     else loss -= diff;
   }
@@ -479,8 +463,8 @@ function macd(values) {
   });
 
   const valid = line.filter(v => v !== null);
-
   const signalValid = emaSeries(valid, 9);
+
   const signal = signalValid[signalValid.length - 1];
   const currentLine = line[line.length - 1];
 
@@ -543,15 +527,19 @@ function adx(candles, period = 14) {
   for (let i = period - 1; i < tr.length; i++) {
     const start = i - period + 1;
 
-    const trSum = tr.slice(start, i + 1).reduce((a, b) => a + b, 0);
-    const plusSum = plus.slice(start, i + 1).reduce((a, b) => a + b, 0);
-    const minusSum = minus.slice(start, i + 1).reduce((a, b) => a + b, 0);
+    const trSum = tr.slice(start, i + 1)
+      .reduce((a, b) => a + b, 0);
+
+    const plusSum = plus.slice(start, i + 1)
+      .reduce((a, b) => a + b, 0);
+
+    const minusSum = minus.slice(start, i + 1)
+      .reduce((a, b) => a + b, 0);
 
     if (!trSum) continue;
 
     const pdi = 100 * plusSum / trSum;
     const mdi = 100 * minusSum / trSum;
-
     const total = pdi + mdi;
 
     dx.push(total ? 100 * Math.abs(pdi - mdi) / total : 0);
@@ -580,10 +568,10 @@ function bollinger(values, period = 20) {
 }
 
 /* =========================================================
-   SUPPORT / RESISTANCE
+   SUPPORT / RESISTANCE AND PATTERNS
 ========================================================= */
 
-function findLevels(candles, price, volatility) {
+function findLevels(candles, price) {
   const data = candles.slice(-120);
   const highs = [];
   const lows = [];
@@ -596,18 +584,14 @@ function findLevels(candles, price, volatility) {
       c.high > data[i - 2].high &&
       c.high >= data[i + 1].high &&
       c.high >= data[i + 2].high
-    ) {
-      highs.push(c.high);
-    }
+    ) highs.push(c.high);
 
     if (
       c.low < data[i - 1].low &&
       c.low < data[i - 2].low &&
       c.low <= data[i + 1].low &&
       c.low <= data[i + 2].low
-    ) {
-      lows.push(c.low);
-    }
+    ) lows.push(c.low);
   }
 
   const resistance = highs
@@ -618,18 +602,14 @@ function findLevels(candles, price, volatility) {
     .filter(v => v < price)
     .sort((a, b) => b - a);
 
-  const fallbackHigh = Math.max(...data.map(c => c.high));
-  const fallbackLow = Math.min(...data.map(c => c.low));
-
   return {
-    support: support[0] || fallbackLow,
-    resistance: resistance[0] || fallbackHigh
+    support: support[0] || Math.min(...data.map(c => c.low)),
+    resistance: resistance[0] || Math.max(...data.map(c => c.high))
   };
 }
 
 function fibonacci(candles) {
   const data = candles.slice(-100);
-
   const high = Math.max(...data.map(c => c.high));
   const low = Math.min(...data.map(c => c.low));
   const range = high - low;
@@ -660,17 +640,11 @@ function candlePattern(candles) {
   const upperWick =
     current.high - Math.max(current.open, current.close);
 
-  if (
-    lowerWick > body * 2 &&
-    upperWick < body * 1.2
-  ) {
+  if (lowerWick > body * 2 && upperWick < body * 1.2) {
     return "Hammer-like candle";
   }
 
-  if (
-    upperWick > body * 2 &&
-    lowerWick < body * 1.2
-  ) {
+  if (upperWick > body * 2 && lowerWick < body * 1.2) {
     return "Shooting-star-like candle";
   }
 
@@ -679,18 +653,14 @@ function candlePattern(candles) {
     previous.close < previous.open &&
     current.close >= previous.open &&
     current.open <= previous.close
-  ) {
-    return "Bullish engulfing";
-  }
+  ) return "Bullish engulfing";
 
   if (
     current.close < current.open &&
     previous.close > previous.open &&
     current.open >= previous.close &&
     current.close <= previous.open
-  ) {
-    return "Bearish engulfing";
-  }
+  ) return "Bearish engulfing";
 
   if (body / range < 0.1) return "Doji-like candle";
 
@@ -715,7 +685,6 @@ function volumeRatio(candles) {
 
 function analyze(candles) {
   const closes = candles.map(c => c.close);
-
   const price = closes[closes.length - 1];
 
   const e20 = ema(closes, 20);
@@ -737,14 +706,12 @@ function analyze(candles) {
   }
 
   const ratio = volumeRatio(candles);
-
-  const levels = findLevels(candles, price, volatility);
+  const levels = findLevels(candles, price);
   const fib = fibonacci(candles);
   const pattern = candlePattern(candles);
 
   let bullish = 0;
   let bearish = 0;
-
   const evidence = [];
 
   if (e20 > e50 && e50 > e200) {
@@ -808,9 +775,7 @@ function analyze(candles) {
     momentum.histogram > 0 &&
     volumeConfirmed &&
     strongADX
-  ) {
-    signal = "BUY";
-  }
+  ) signal = "BUY";
 
   if (
     bearish >= 4 &&
@@ -821,9 +786,7 @@ function analyze(candles) {
     momentum.histogram < 0 &&
     volumeConfirmed &&
     strongADX
-  ) {
-    signal = "SELL";
-  }
+  ) signal = "SELL";
 
   if (signal === "WAIT") {
     const missing = [];
@@ -832,11 +795,9 @@ function analyze(candles) {
     if (!strongADX) missing.push("ADX trend strength");
     if (momentum.histogram === 0) missing.push("MACD direction");
 
-    if (missing.length) {
-      reason = "Missing: " + missing.join(", ") + ".";
-    } else {
-      reason = "Trend, momentum and directional evidence conflict.";
-    }
+    reason = missing.length
+      ? "Missing: " + missing.join(", ") + "."
+      : "Trend, momentum and directional evidence conflict.";
   }
 
   const riskDistance = volatility * 1.5;
@@ -848,7 +809,6 @@ function analyze(candles) {
 
   if (signal === "BUY") {
     stop = price - riskDistance;
-
     target1 = price + riskDistance * 1.5;
     target2 = price + riskDistance * 2.5;
 
@@ -860,14 +820,13 @@ function analyze(candles) {
 
     if (rewardRisk < 1.2) {
       signal = "WAIT";
-      reason = "The nearest resistance does not provide the required reward-to-risk ratio.";
+      reason = "Nearest resistance does not provide the required reward-to-risk ratio.";
       stop = target1 = target2 = rewardRisk = null;
     }
   }
 
   if (signal === "SELL") {
     stop = price + riskDistance;
-
     target1 = price - riskDistance * 1.5;
     target2 = price - riskDistance * 2.5;
 
@@ -879,7 +838,7 @@ function analyze(candles) {
 
     if (rewardRisk < 1.2) {
       signal = "WAIT";
-      reason = "The nearest support does not provide the required reward-to-risk ratio.";
+      reason = "Nearest support does not provide the required reward-to-risk ratio.";
       stop = target1 = target2 = rewardRisk = null;
     }
   }
@@ -889,11 +848,7 @@ function analyze(candles) {
   }
 
   return {
-    signal,
-    price,
-    e20,
-    e50,
-    e200,
+    signal, price, e20, e50, e200,
     rsi: strength,
     macd: momentum,
     atr: volatility,
@@ -925,7 +880,6 @@ function classifyTrend(candles) {
   const e20 = ema(closes, 20);
   const e50 = ema(closes, 50);
   const e200 = ema(closes, 200);
-
   const strength = rsi(closes);
   const momentum = macd(closes);
 
@@ -937,18 +891,14 @@ function classifyTrend(candles) {
     closes[closes.length - 1] > e20 &&
     strength > 50 &&
     momentum.histogram > 0
-  ) {
-    return "Bullish";
-  }
+  ) return "Bullish";
 
   if (
     down &&
     closes[closes.length - 1] < e20 &&
     strength < 50 &&
     momentum.histogram < 0
-  ) {
-    return "Bearish";
-  }
+  ) return "Bearish";
 
   return "Mixed";
 }
@@ -984,13 +934,11 @@ async function getMTF(symbol, interval, market) {
     }
   }
 
-  const available = items.filter(
-    item => item.trend !== "Unavailable"
-  );
-
   return {
     items,
-    available: available.length,
+    available: items.filter(
+      item => item.trend !== "Unavailable"
+    ).length,
     direction: "Higher-timeframe context"
   };
 }
@@ -1053,11 +1001,7 @@ function applyMTF(base, mtf) {
     gradeReason = "Weekly analysis has no higher timeframe available.";
   }
 
-  return {
-    ...base,
-    grade,
-    gradeReason
-  };
+  return { ...base, grade, gradeReason };
 }
 
 /* =========================================================
@@ -1078,26 +1022,11 @@ function displayAnalysis(result, symbol, market, interval, mtf) {
     ? "<p>No entry, stop-loss or take-profit is issued for a WAIT signal.</p>"
     : `
       <div class="result-grid">
-        <div class="result-stat">
-          <span>Reference entry</span>
-          <strong>${money(result.price)}</strong>
-        </div>
-        <div class="result-stat">
-          <span>Stop-loss</span>
-          <strong>${money(result.stop)}</strong>
-        </div>
-        <div class="result-stat">
-          <span>Take profit 1</span>
-          <strong>${money(result.target1)}</strong>
-        </div>
-        <div class="result-stat">
-          <span>Take profit 2</span>
-          <strong>${money(result.target2)}</strong>
-        </div>
-        <div class="result-stat">
-          <span>Reward/risk</span>
-          <strong>${number(result.rewardRisk)} : 1</strong>
-        </div>
+        <div class="result-stat"><span>Reference entry</span><strong>${money(result.price)}</strong></div>
+        <div class="result-stat"><span>Stop-loss</span><strong>${money(result.stop)}</strong></div>
+        <div class="result-stat"><span>Take profit 1</span><strong>${money(result.target1)}</strong></div>
+        <div class="result-stat"><span>Take profit 2</span><strong>${money(result.target2)}</strong></div>
+        <div class="result-stat"><span>Reward/risk</span><strong>${number(result.rewardRisk)} : 1</strong></div>
       </div>
     `;
 
@@ -1112,7 +1041,6 @@ function displayAnalysis(result, symbol, market, interval, mtf) {
       </div>
 
       <h3>Technical indicators</h3>
-
       <div class="metrics">
         <div class="metric"><span>EMA20</span><strong>${money(result.e20)}</strong></div>
         <div class="metric"><span>EMA50</span><strong>${money(result.e50)}</strong></div>
@@ -1136,47 +1064,34 @@ function displayAnalysis(result, symbol, market, interval, mtf) {
       <h3>Fibonacci reference levels</h3>
       <div class="metrics">
         ${Object.entries(result.fib).map(([key, value]) => `
-          <div class="metric">
-            <span>${key}</span>
-            <strong>${money(value)}</strong>
-          </div>
+          <div class="metric"><span>${key}</span><strong>${money(value)}</strong></div>
         `).join("")}
       </div>
 
-      <p class="muted-note">
-        Candlestick observation: ${esc(result.pattern)}
-      </p>
-
-      <p class="muted-note">
-        Evidence count: ${result.bullish} bullish · ${result.bearish} bearish.
-      </p>
+      <p class="muted-note">Candlestick observation: ${esc(result.pattern)}</p>
+      <p class="muted-note">Evidence count: ${result.bullish} bullish · ${result.bearish} bearish.</p>
     </div>
   `;
 
-  const grade = $("signalGrade");
-
-  if (grade) {
-    grade.innerHTML = `
+  if ($("signalGrade")) {
+    $("signalGrade").innerHTML = `
       <div class="result-card">
-        <b class="grade-${result.grade.toLowerCase()}">
-          ${result.grade} signal grade
-        </b>
+        <b class="grade-${result.grade.toLowerCase()}">${result.grade} signal grade</b>
         <p>${esc(result.gradeReason)}</p>
         <small>Grade measures evidence alignment, not probability of profit.</small>
       </div>
     `;
   }
 
-  const trend = $("trendSummary");
+  if ($("trendSummary")) {
+    const text =
+      result.e20 > result.e50 && result.e50 > result.e200
+        ? "Bullish base-timeframe structure"
+        : result.e20 < result.e50 && result.e50 < result.e200
+          ? "Bearish base-timeframe structure"
+          : "Mixed base-timeframe structure";
 
-  if (trend) {
-    let text = result.e20 > result.e50 && result.e50 > result.e200
-      ? "Bullish base-timeframe structure"
-      : result.e20 < result.e50 && result.e50 < result.e200
-        ? "Bearish base-timeframe structure"
-        : "Mixed base-timeframe structure";
-
-    trend.innerHTML = `
+    $("trendSummary").innerHTML = `
       <div class="result-card">
         <b>${esc(text)}</b>
         <p>RSI: ${number(result.rsi)} · ADX: ${number(result.adx)}</p>
@@ -1186,19 +1101,12 @@ function displayAnalysis(result, symbol, market, interval, mtf) {
 
   renderMTF(mtf);
 
-  lastAnalysis = {
-    result,
-    symbol,
-    market,
-    interval,
-    mtf
-  };
+  lastAnalysis = { result, symbol, market, interval, mtf };
 }
 
 function renderMTF(mtf) {
   const status = $("mtfStatus");
   const container = $("timeframeConfirmation");
-
   if (!container) return;
 
   if (!mtf.items.length) {
@@ -1210,7 +1118,6 @@ function renderMTF(mtf) {
     `;
 
     if (status) status.textContent = "Weekly analysis";
-
     return;
   }
 
@@ -1218,15 +1125,14 @@ function renderMTF(mtf) {
     <div class="metric">
       <span>${esc(item.timeframe)}</span>
       <strong>${esc(item.trend)}</strong>
-      ${item.error
-        ? `<small>${esc(item.error)}</small>`
-        : ""}
+      ${item.error ? `<small>${esc(item.error)}</small>` : ""}
     </div>
   `).join("");
 
   if (status) {
     status.textContent =
-      mtf.available + " / " + mtf.items.length + " confirmations available";
+      mtf.available + " / " + mtf.items.length +
+      " confirmations available";
   }
 }
 
@@ -1246,8 +1152,9 @@ function getCredits() {
 }
 
 function updateCredits() {
-  const el = $("credits");
-  if (el) el.textContent = getCredits() + " / 4";
+  if ($("credits")) {
+    $("credits").textContent = getCredits() + " / 4";
+  }
 }
 
 function useCredit() {
@@ -1260,7 +1167,6 @@ function useCredit() {
 
   localStorage.setItem(STORE.credits, String(current - 1));
   updateCredits();
-
   return true;
 }
 
@@ -1291,20 +1197,15 @@ async function runAnalysis(isAlert = false) {
       ? $("alertInterval").value
       : $("interval").value;
 
-    const market = isAlert
-      ? "spot"
-      : $("marketType").value;
+    const market = isAlert ? "spot" : $("marketType").value;
 
     const candles = await getCandles(symbol, interval, market, 500);
-
     const base = analyze(candles);
 
     let mtf = { items: [], available: 0 };
 
     if (!isAlert) {
-      const selected = await getMTF(symbol, interval, market);
-
-      mtf = selected;
+      mtf = await getMTF(symbol, interval, market);
     }
 
     const result = applyMTF(base, mtf);
@@ -1322,35 +1223,31 @@ async function runAnalysis(isAlert = false) {
     console.error(error);
 
     if (!isAlert) {
-      const output = $("analysisResult");
-
-      if (output) {
-        output.innerHTML =
+      if ($("analysisResult")) {
+        $("analysisResult").innerHTML =
           `<div class="risk-warning">${esc(error.message)}</div>`;
       }
-
       toast(error.message);
     }
 
   } finally {
     busyAnalysis = false;
-
     if (!isAlert) setButtonLoading(button, false);
   }
 }
 
 /* =========================================================
-   BACKTESTING
+   BACKTESTING V3.3
 ========================================================= */
 
 function calculateBacktestTrade(
   candles,
   index,
   feeRate,
-  slippageRate
+  slippageRate,
+  market
 ) {
   const historical = candles.slice(0, index);
-
   if (historical.length < 220) return null;
 
   let analysis;
@@ -1363,15 +1260,17 @@ function calculateBacktestTrade(
 
   if (analysis.signal === "WAIT") return null;
 
-  const entryCandle = candles[index];
+  // A spot backtest cannot open a short position.
+  if (market === "spot" && analysis.signal === "SELL") {
+    return null;
+  }
 
+  const entryCandle = candles[index];
   const side = analysis.signal === "BUY" ? "LONG" : "SHORT";
 
-  const rawEntry = entryCandle.open;
-
   const entry = side === "LONG"
-    ? rawEntry * (1 + slippageRate)
-    : rawEntry * (1 - slippageRate);
+    ? entryCandle.open * (1 + slippageRate)
+    : entryCandle.open * (1 - slippageRate);
 
   const stop = analysis.stop;
   const target = analysis.target1;
@@ -1380,9 +1279,20 @@ function calculateBacktestTrade(
     return null;
   }
 
-  const risk = Math.abs(entry - stop);
+  if (
+    side === "LONG" &&
+    (stop >= entry || target <= entry)
+  ) return null;
 
-  if (risk <= 0) return null;
+  if (
+    side === "SHORT" &&
+    (stop <= entry || target >= entry)
+  ) return null;
+
+  const riskDistance = Math.abs(entry - stop);
+  const riskFraction = riskDistance / entry;
+
+  if (!riskFraction) return null;
 
   let exit = null;
   let outcome = "OPEN";
@@ -1391,28 +1301,27 @@ function calculateBacktestTrade(
   const maxHold = Math.min(candles.length - 1, index + 50);
 
   for (let j = index; j <= maxHold; j++) {
-    const c = candles[j];
+    const candle = candles[j];
 
     const stopHit = side === "LONG"
-      ? c.low <= stop
-      : c.high >= stop;
+      ? candle.low <= stop
+      : candle.high >= stop;
 
     const targetHit = side === "LONG"
-      ? c.high >= target
-      : c.low <= target;
+      ? candle.high >= target
+      : candle.low <= target;
 
-    // Conservative rule: if both hit in one candle,
-    // assume the stop-loss occurred first.
+    // Conservative same-candle assumption.
     if (stopHit) {
       exit = stop;
-      outcome = "LOSS";
+      outcome = "STOP LOSS";
       exitIndex = j;
       break;
     }
 
     if (targetHit) {
       exit = target;
-      outcome = "WIN";
+      outcome = "TAKE PROFIT";
       exitIndex = j;
       break;
     }
@@ -1433,9 +1342,7 @@ function calculateBacktestTrade(
   const grossReturn =
     direction * (executionExit - entry) / entry;
 
-  const fees = feeRate * 2;
-
-  const netReturn = grossReturn - fees;
+  const netReturn = grossReturn - feeRate * 2;
 
   return {
     side,
@@ -1445,6 +1352,7 @@ function calculateBacktestTrade(
     target,
     outcome,
     netReturn,
+    riskFraction,
     exitIndex
   };
 }
@@ -1464,7 +1372,16 @@ async function runBacktest() {
     const symbol = $("backtestSymbol").value;
     const market = $("backtestMarket").value;
     const interval = $("backtestInterval").value;
-    const limit = Number($("backtestCandles").value);
+
+    let limit = Number($("backtestCandles").value);
+
+    if (limit < 500) {
+      limit = 500;
+      if ($("backtestCandles")) {
+        $("backtestCandles").value = "500";
+      }
+      toast("Backtesting requires at least 500 candles. Using 500.");
+    }
 
     const candles = await getCandles(
       symbol,
@@ -1474,7 +1391,6 @@ async function runBacktest() {
     );
 
     const trades = [];
-
     let index = 220;
 
     while (index < candles.length - 1) {
@@ -1482,7 +1398,8 @@ async function runBacktest() {
         candles,
         index,
         FEE_RATE,
-        SLIPPAGE_RATE
+        SLIPPAGE_RATE,
+        market
       );
 
       if (trade) {
@@ -1492,9 +1409,7 @@ async function runBacktest() {
         index++;
       }
 
-      if (index % 15 === 0) {
-        await sleep(0);
-      }
+      if (index % 15 === 0) await sleep(0);
     }
 
     const wins = trades.filter(t => t.netReturn > 0).length;
@@ -1508,8 +1423,16 @@ async function runBacktest() {
     let peak = equity;
     let maxDrawdown = 0;
 
+    const riskPerTrade = 0.01;
+    const equityCurve = [];
+
     trades.forEach(trade => {
-      equity *= 1 + trade.netReturn;
+      // Risk 1% of equity, capped at 1x account equity.
+      const riskCash = equity * riskPerTrade;
+      const desiredNotional = riskCash / trade.riskFraction;
+      const notional = Math.min(equity, desiredNotional);
+
+      equity += notional * trade.netReturn;
 
       peak = Math.max(peak, equity);
 
@@ -1518,11 +1441,37 @@ async function runBacktest() {
         : 0;
 
       maxDrawdown = Math.max(maxDrawdown, drawdown);
+
+      equityCurve.push(equity);
     });
 
     const totalReturn = (equity - 10000) / 10000 * 100;
 
-    saveJSON("agu_last_backtest_v32", {
+    const grossWins = trades
+      .filter(t => t.netReturn > 0)
+      .reduce((sum, t) => sum + t.netReturn, 0);
+
+    const grossLosses = Math.abs(trades
+      .filter(t => t.netReturn <= 0)
+      .reduce((sum, t) => sum + t.netReturn, 0));
+
+    const profitFactor = grossLosses > 0
+      ? grossWins / grossLosses
+      : grossWins > 0 ? Infinity : 0;
+
+    const averageReturn = trades.length
+      ? trades.reduce((sum, t) => sum + t.netReturn, 0) / trades.length
+      : 0;
+
+    const largestWin = trades.length
+      ? Math.max(0, ...trades.map(t => t.netReturn))
+      : 0;
+
+    const largestLoss = trades.length
+      ? Math.min(0, ...trades.map(t => t.netReturn))
+      : 0;
+
+    saveJSON("agu_last_backtest_v33", {
       symbol,
       market,
       interval,
@@ -1533,56 +1482,46 @@ async function runBacktest() {
       equity,
       totalReturn,
       maxDrawdown,
+      profitFactor,
+      averageReturn,
       time: Date.now()
     });
 
     output.innerHTML = `
       <div class="result-card">
-        <h3>Backtest results</h3>
+        <h3>Backtest results — V3.3</h3>
         <p>${esc(symbol)} · ${esc(market)} · ${esc(interval)}</p>
         <p>Completed historical candles: ${candles.length}</p>
 
         <div class="result-grid">
-          <div class="result-stat">
-            <span>Total trades</span>
-            <strong>${trades.length}</strong>
-          </div>
-          <div class="result-stat">
-            <span>Winning trades</span>
-            <strong>${wins}</strong>
-          </div>
-          <div class="result-stat">
-            <span>Losing / non-winning trades</span>
-            <strong>${losses}</strong>
-          </div>
-          <div class="result-stat">
-            <span>Observed win rate</span>
-            <strong>${number(winRate)}%</strong>
-          </div>
-          <div class="result-stat">
-            <span>Simulated final equity</span>
-            <strong>${money(equity)}</strong>
-          </div>
-          <div class="result-stat">
-            <span>Net return</span>
-            <strong>${number(totalReturn)}%</strong>
-          </div>
-          <div class="result-stat">
-            <span>Maximum drawdown</span>
-            <strong>${number(maxDrawdown)}%</strong>
-          </div>
+          <div class="result-stat"><span>Total trades</span><strong>${trades.length}</strong></div>
+          <div class="result-stat"><span>Winning trades</span><strong>${wins}</strong></div>
+          <div class="result-stat"><span>Losing trades</span><strong>${losses}</strong></div>
+          <div class="result-stat"><span>Observed win rate</span><strong>${number(winRate)}%</strong></div>
+          <div class="result-stat"><span>Final simulated equity</span><strong>${money(equity)}</strong></div>
+          <div class="result-stat"><span>Net return</span><strong>${number(totalReturn)}%</strong></div>
+          <div class="result-stat"><span>Maximum drawdown</span><strong>${number(maxDrawdown)}%</strong></div>
+          <div class="result-stat"><span>Profit factor</span><strong>${Number.isFinite(profitFactor) ? number(profitFactor) : "N/A"}</strong></div>
+          <div class="result-stat"><span>Average trade return</span><strong>${number(averageReturn * 100, 3)}%</strong></div>
+          <div class="result-stat"><span>Largest winning trade</span><strong>${number(largestWin * 100, 3)}%</strong></div>
+          <div class="result-stat"><span>Largest losing trade</span><strong>${number(largestLoss * 100, 3)}%</strong></div>
         </div>
 
         <h3>Execution assumptions</h3>
+        <p>Signals are calculated from candles available before entry.</p>
         <p>Entry: next candle open after signal.</p>
+        <p>Position risk: 1% of simulated equity, capped at 1x equity.</p>
         <p>Fees: assumed 0.10% per side.</p>
         <p>Slippage: assumed 0.05% per side.</p>
-        <p>If stop-loss and target are touched in the same candle, stop-loss is assumed first.</p>
+        <p>Same-candle stop and target: stop-loss assumed first.</p>
+        <p>Maximum holding period: 50 candles.</p>
+        <p>Spot backtesting excludes short positions.</p>
 
         <div class="risk-warning">
-          These are simulated historical results, not live performance.
-          Fees and slippage are assumptions, not your actual exchange costs.
-          The simulation does not establish future profitability.
+          This is a base-timeframe-only historical simulation.
+          It does not use multi-timeframe confirmation.
+          Results are not live performance or proof of future profitability.
+          Fee, slippage and execution assumptions may differ from real markets.
         </div>
       </div>
     `;
@@ -1592,7 +1531,6 @@ async function runBacktest() {
   } catch (error) {
     output.innerHTML =
       `<div class="risk-warning">${esc(error.message)}</div>`;
-
     toast(error.message);
 
   } finally {
@@ -1601,7 +1539,7 @@ async function runBacktest() {
 }
 
 /* =========================================================
-   PAPER TRADING
+   PAPER ACCOUNT AND MIGRATION
 ========================================================= */
 
 function defaultPaperAccount() {
@@ -1611,12 +1549,45 @@ function defaultPaperAccount() {
     positions: [],
     history: [],
     realized: 0,
-    created: Date.now()
+    created: Date.now(),
+    dayKey: new Date().toDateString(),
+    dayStartEquity: STARTING_BALANCE
   };
 }
 
+function migratePaperAccount() {
+  const existing = readJSON(STORE.paper, null);
+
+  if (existing) return existing;
+
+  const old = readJSON(STORE.oldPaper, null);
+
+  if (!old) return defaultPaperAccount();
+
+  const migrated = {
+    ...old,
+    positions: (old.positions || []).map(position => ({
+      ...position,
+      stopLoss: null,
+      takeProfit: null,
+      trailingPercent: 0,
+      trailingStop: null,
+      highestPrice: position.entry,
+      lowestPrice: position.entry,
+      protectionSet: false,
+      riskAmount: null
+    })),
+    history: old.history || [],
+    dayKey: new Date().toDateString(),
+    dayStartEquity: Number(old.balance) || STARTING_BALANCE
+  };
+
+  saveJSON(STORE.paper, migrated);
+  return migrated;
+}
+
 function getPaperAccount() {
-  return readJSON(STORE.paper, null) || defaultPaperAccount();
+  return migratePaperAccount();
 }
 
 function savePaperAccount(account) {
@@ -1624,53 +1595,511 @@ function savePaperAccount(account) {
   renderPaperAccount();
 }
 
-function getRiskSettings() {
-  return readJSON(STORE.risk, {
+function defaultRiskSettings() {
+  return {
     balance: STARTING_BALANCE,
     riskPercent: 1,
     dailyLossLimit: 3
+  };
+}
+
+function getRiskSettings() {
+  const current = readJSON(STORE.risk, null);
+
+  if (current) return current;
+
+  const old = readJSON(STORE.oldRisk, null);
+
+  if (old) {
+    saveJSON(STORE.risk, old);
+    return old;
+  }
+
+  return defaultRiskSettings();
+}
+
+function currentDayKey() {
+  return new Date().toDateString();
+}
+
+function positionGross(position, price) {
+  const direction = position.side === "LONG" ? 1 : -1;
+
+  return direction *
+    (price - position.entry) /
+    position.entry *
+    position.amount;
+}
+
+function positionNetEstimate(position, price) {
+  return positionGross(position, price) -
+    (position.openingFee || 0) -
+    position.amount * FEE_RATE;
+}
+
+function accountEquity(account, prices = lastMarketPrices) {
+  let equity = account.balance;
+
+  account.positions.forEach(position => {
+    const price = Number(prices[position.symbol]) || position.entry;
+
+    equity += position.amount +
+      positionGross(position, price) -
+      position.amount * FEE_RATE;
   });
+
+  return equity;
+}
+
+function ensureDailySnapshot(account) {
+  const today = currentDayKey();
+
+  if (account.dayKey !== today) {
+    account.dayKey = today;
+    account.dayStartEquity = accountEquity(account);
+    saveJSON(STORE.paper, account);
+  }
+
+  if (!Number.isFinite(account.dayStartEquity)) {
+    account.dayStartEquity = accountEquity(account);
+  }
+}
+
+function getDailyPnL(account) {
+  const today = currentDayKey();
+
+  const realizedToday = account.history
+    .filter(trade =>
+      new Date(trade.closedAt).toDateString() === today
+    )
+    .reduce((sum, trade) => sum + Number(trade.pnl || 0), 0);
+
+  const unrealizedToday = account.positions
+    .filter(position =>
+      new Date(position.openedAt).toDateString() === today
+    )
+    .reduce((sum, position) => {
+      const price =
+        Number(lastMarketPrices[position.symbol]) || position.entry;
+
+      return sum + positionNetEstimate(position, price);
+    }, 0);
+
+  return realizedToday + unrealizedToday;
 }
 
 function getDailyRealizedLoss(account) {
-  const today = new Date().toDateString();
+  const today = currentDayKey();
 
   return account.history
     .filter(trade =>
       new Date(trade.closedAt).toDateString() === today
     )
-    .reduce((sum, trade) => sum + Math.min(0, trade.pnl), 0);
+    .reduce((sum, trade) => sum + Math.min(0, Number(trade.pnl || 0)), 0);
 }
 
-async function currentPrice(symbol) {
-  const data = await request(
-    API.spot + "/ticker/price?symbol=" +
-    encodeURIComponent(symbol)
+/* =========================================================
+   PAPER TRADING CONTROLS
+========================================================= */
+
+function injectPaperControls() {
+  if ($("paperProtectionControls")) return;
+
+  const amount = $("paperAmount");
+  const status = $("paperStatus");
+
+  const anchor = amount?.parentElement || status?.parentElement;
+
+  if (!anchor) return;
+
+  const wrapper = document.createElement("div");
+  wrapper.id = "paperProtectionControls";
+  wrapper.className = "result-card";
+
+  wrapper.innerHTML = `
+    <h3>V3.3 trade protection</h3>
+
+    <label for="paperStopLoss">Stop-loss price (required)</label>
+    <input id="paperStopLoss" type="number" min="0" step="any"
+      placeholder="Enter stop-loss price">
+
+    <label for="paperTakeProfit">Take-profit price (required)</label>
+    <input id="paperTakeProfit" type="number" min="0" step="any"
+      placeholder="Enter take-profit price">
+
+    <label for="paperTrailingPercent">Trailing stop (%) — optional</label>
+    <select id="paperTrailingPercent">
+      <option value="0">Disabled</option>
+      <option value="0.5">0.5%</option>
+      <option value="1">1%</option>
+      <option value="1.5">1.5%</option>
+      <option value="2">2%</option>
+      <option value="3">3%</option>
+      <option value="5">5%</option>
+    </select>
+
+    <p class="muted-note">
+      Position size is calculated from your account equity,
+      selected risk percentage and stop-loss distance.
+      The amount field remains the maximum notional size.
+    </p>
+  `;
+
+  anchor.insertAdjacentElement("afterend", wrapper);
+}
+
+/* =========================================================
+   PAPER RISK AND POSITION SIZING
+========================================================= */
+
+function calculatePositionSize(account, entry, stop, maxNotional, riskPercent) {
+  const equity = accountEquity(account);
+
+  const riskCash = equity * riskPercent / 100;
+  const riskFraction = Math.abs(entry - stop) / entry;
+
+  if (!riskFraction || !Number.isFinite(riskFraction)) {
+    throw new Error("Invalid stop-loss distance.");
+  }
+
+  const riskBasedNotional = riskCash / riskFraction;
+
+  const availableAfterFee =
+    account.balance / (1 + FEE_RATE);
+
+  const amount = Math.min(
+    maxNotional,
+    riskBasedNotional,
+    availableAfterFee
   );
 
-  return Number(data.price);
+  if (!Number.isFinite(amount) || amount < 10) {
+    throw new Error("Calculated position size is below 10 USDT.");
+  }
+
+  return {
+    amount,
+    riskCash,
+    riskBasedNotional,
+    equity
+  };
 }
+
+function validateProtection(side, entry, stop, target) {
+  if (
+    !Number.isFinite(stop) ||
+    !Number.isFinite(target) ||
+    stop <= 0 ||
+    target <= 0
+  ) {
+    throw new Error("Enter valid stop-loss and take-profit prices.");
+  }
+
+  if (side === "LONG" && !(stop < entry && target > entry)) {
+    throw new Error(
+      "For LONG: stop-loss must be below entry and take-profit above entry."
+    );
+  }
+
+  if (side === "SHORT" && !(target < entry && stop > entry)) {
+    throw new Error(
+      "For SHORT: take-profit must be below entry and stop-loss above entry."
+    );
+  }
+}
+
+/* =========================================================
+   PAPER TRADE OPEN
+========================================================= */
+
+async function openPaperTrade() {
+  const symbol = $("paperSymbol").value;
+  const side = $("paperSide").value;
+  const maxAmount = Number($("paperAmount").value);
+
+  const stop = Number($("paperStopLoss")?.value);
+  const target = Number($("paperTakeProfit")?.value);
+  const trailingPercent =
+    Number($("paperTrailingPercent")?.value || 0);
+
+  const account = getPaperAccount();
+  const settings = getRiskSettings();
+
+  if (!Number.isFinite(maxAmount) || maxAmount < 10) {
+    toast("Enter a maximum notional amount of at least 10 USDT.");
+    return;
+  }
+
+  if (account.positions.length >= 10) {
+    toast("Maximum of 10 open simulated positions reached.");
+    return;
+  }
+
+  try {
+    ensureDailySnapshot(account);
+
+    const price = await currentPrice(symbol);
+
+    validateProtection(side, price, stop, target);
+
+    const sizing = calculatePositionSize(
+      account,
+      price,
+      stop,
+      maxAmount,
+      settings.riskPercent
+    );
+
+    const amount = sizing.amount;
+    const openingFee = amount * FEE_RATE;
+
+    const position = {
+      id: String(Date.now()) + Math.random().toString(36).slice(2, 8),
+      symbol,
+      side,
+      amount,
+      entry: price,
+      openedAt: Date.now(),
+      openingFee,
+      stopLoss: stop,
+      originalStop: stop,
+      takeProfit: target,
+      trailingPercent,
+      trailingStop: trailingPercent > 0
+        ? side === "LONG"
+          ? price * (1 - trailingPercent / 100)
+          : price * (1 + trailingPercent / 100)
+        : null,
+      highestPrice: price,
+      lowestPrice: price,
+      protectionSet: true,
+      riskAmount: sizing.riskCash,
+      riskPercent: settings.riskPercent
+    };
+
+    const required = amount + openingFee;
+
+    if (required > account.balance) {
+      throw new Error("Insufficient virtual balance after estimated fee.");
+    }
+
+    account.balance -= required;
+    account.positions.push(position);
+
+    savePaperAccount(account);
+
+    if ($("paperStatus")) {
+      $("paperStatus").textContent =
+        "Simulated " + side + " opened for " +
+        symbol + " at " + money(price) +
+        ". Estimated risk budget: " + money(sizing.riskCash) + ".";
+    }
+
+    toast("Protected simulated position opened.");
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+/* =========================================================
+   PAPER TRADE CLOSE
+========================================================= */
+
+async function closePaperTrade(id, exitOverride = null, reason = "MANUAL") {
+  const account = getPaperAccount();
+
+  const index = account.positions.findIndex(
+    position => position.id === id
+  );
+
+  if (index < 0) return;
+
+  const position = account.positions[index];
+
+  try {
+    const exit = Number.isFinite(exitOverride)
+      ? exitOverride
+      : await currentPrice(position.symbol);
+
+    const gross = positionGross(position, exit);
+    const closingFee = position.amount * FEE_RATE;
+
+    const pnl =
+      gross -
+      (position.openingFee || 0) -
+      closingFee;
+
+    account.balance +=
+      position.amount + gross - closingFee;
+
+    account.realized += pnl;
+
+    account.history.push({
+      ...position,
+      exit,
+      pnl,
+      closedAt: Date.now(),
+      closingFee,
+      exitReason: reason
+    });
+
+    account.positions.splice(index, 1);
+
+    savePaperAccount(account);
+
+    if ($("paperStatus")) {
+      $("paperStatus").textContent =
+        position.symbol + " " + position.side +
+        " closed at " + money(exit) +
+        ". Reason: " + reason +
+        ". Net P/L: " + money(pnl);
+    }
+
+    toast("Simulated position closed: " + reason);
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+/* =========================================================
+   PROTECTIVE STOP AND TARGET MONITOR
+========================================================= */
+
+async function monitorPaperPositions() {
+  if (paperBusy) return;
+
+  const account = getPaperAccount();
+  if (!account.positions.length) return;
+
+  paperBusy = true;
+
+  try {
+    const symbols = [...new Set(
+      account.positions.map(p => p.symbol)
+    )];
+
+    const results = await Promise.allSettled(
+      symbols.map(async symbol => ({
+        symbol,
+        price: await currentPrice(symbol)
+      }))
+    );
+
+    const prices = {};
+
+    results.forEach(result => {
+      if (result.status === "fulfilled") {
+        prices[result.value.symbol] = result.value.price;
+        lastMarketPrices[result.value.symbol] = result.value.price;
+      }
+    });
+
+    for (const position of [...account.positions]) {
+      const price = prices[position.symbol];
+      if (!Number.isFinite(price)) continue;
+
+      position.highestPrice = Math.max(
+        Number(position.highestPrice || position.entry),
+        price
+      );
+
+      position.lowestPrice = Math.min(
+        Number(position.lowestPrice || position.entry),
+        price
+      );
+
+      if (position.protectionSet && position.trailingPercent > 0) {
+        const fraction = position.trailingPercent / 100;
+
+        if (position.side === "LONG") {
+          const candidate = price * (1 - fraction);
+
+          position.trailingStop = Math.max(
+            Number(position.trailingStop || 0),
+            candidate
+          );
+        } else {
+          const candidate = price * (1 + fraction);
+
+          position.trailingStop = Math.min(
+            Number(position.trailingStop || Infinity),
+            candidate
+          );
+        }
+      }
+
+      if (!position.protectionSet) continue;
+
+      let effectiveStop = Number(position.stopLoss);
+
+      if (Number.isFinite(position.trailingStop)) {
+        effectiveStop = position.side === "LONG"
+          ? Math.max(effectiveStop, position.trailingStop)
+          : Math.min(effectiveStop, position.trailingStop);
+      }
+
+      let reason = null;
+
+      if (
+        position.side === "LONG" &&
+        price <= effectiveStop
+      ) reason = position.trailingStop > position.originalStop
+        ? "TRAILING STOP"
+        : "STOP LOSS";
+
+      if (
+        position.side === "SHORT" &&
+        price >= effectiveStop
+      ) reason = position.trailingStop < position.originalStop
+        ? "TRAILING STOP"
+        : "STOP LOSS";
+
+      if (
+        position.side === "LONG" &&
+        price >= position.takeProfit
+      ) reason = "TAKE PROFIT";
+
+      if (
+        position.side === "SHORT" &&
+        price <= position.takeProfit
+      ) reason = "TAKE PROFIT";
+
+      if (reason) {
+        await closePaperTrade(position.id, price, reason);
+      }
+    }
+
+    saveJSON(STORE.paper, account);
+    renderPaperAccount();
+
+  } catch (error) {
+    console.warn("Paper position monitor:", error);
+  } finally {
+    paperBusy = false;
+  }
+}
+
+/* =========================================================
+   PAPER ACCOUNT DISPLAY
+========================================================= */
 
 function renderPaperAccount() {
   const account = getPaperAccount();
+
+  ensureDailySnapshot(account);
 
   const prices = lastMarketPrices;
 
   let unrealized = 0;
 
   account.positions.forEach(position => {
-    const price = prices[position.symbol];
-
-    if (!price) return;
-
-    const direction = position.side === "LONG" ? 1 : -1;
-
-    unrealized +=
-      direction *
-      (price - position.entry) /
-      position.entry *
-      position.amount;
+    const price = Number(prices[position.symbol]) || position.entry;
+    unrealized += positionGross(position, price);
   });
+
+  const equity = accountEquity(account, prices);
 
   if ($("paperBalance")) {
     $("paperBalance").textContent = money(account.balance);
@@ -1693,6 +2122,8 @@ function renderPaperAccount() {
   if (positions) {
     positions.innerHTML = account.positions.length
       ? `
+        <p>Estimated account equity: <b>${money(equity)}</b></p>
+        <p>Unrealized gross P/L: <b>${money(unrealized)}</b></p>
         <table>
           <thead>
             <tr>
@@ -1700,20 +2131,25 @@ function renderPaperAccount() {
               <th>Side</th>
               <th>Entry</th>
               <th>Current</th>
-              <th>Unrealized P/L</th>
+              <th>Stop</th>
+              <th>Target</th>
+              <th>Net estimate</th>
+              <th>Protection</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
             ${account.positions.map(position => {
-              const price = prices[position.symbol] || position.entry;
-              const direction = position.side === "LONG" ? 1 : -1;
+              const price =
+                Number(prices[position.symbol]) || position.entry;
 
-              const pnl =
-                direction *
-                (price - position.entry) /
-                position.entry *
-                position.amount;
+              const pnl = positionNetEstimate(position, price);
+
+              const effectiveStop = position.trailingStop
+                ? position.side === "LONG"
+                  ? Math.max(position.stopLoss || 0, position.trailingStop)
+                  : Math.min(position.stopLoss || Infinity, position.trailingStop)
+                : position.stopLoss;
 
               return `
                 <tr>
@@ -1721,12 +2157,12 @@ function renderPaperAccount() {
                   <td>${esc(position.side)}</td>
                   <td>${money(position.entry)}</td>
                   <td>${money(price)}</td>
-                  <td class="${pnl >= 0 ? "positive" : "negative"}">
-                    ${money(pnl)}
-                  </td>
+                  <td>${position.protectionSet ? money(effectiveStop) : "Not set"}</td>
+                  <td>${position.protectionSet ? money(position.takeProfit) : "Not set"}</td>
+                  <td class="${pnl >= 0 ? "positive" : "negative"}">${money(pnl)}</td>
+                  <td>${position.protectionSet ? "Active while page runs" : "Unprotected"}</td>
                   <td>
-                    <button class="outline"
-                      data-close-paper="${esc(position.id)}">
+                    <button class="outline" data-close-paper="${esc(position.id)}">
                       Close
                     </button>
                   </td>
@@ -1752,6 +2188,7 @@ function renderPaperAccount() {
               <th>Entry</th>
               <th>Exit</th>
               <th>Profit/Loss</th>
+              <th>Reason</th>
               <th>Closed</th>
             </tr>
           </thead>
@@ -1762,9 +2199,8 @@ function renderPaperAccount() {
                 <td>${esc(trade.side)}</td>
                 <td>${money(trade.entry)}</td>
                 <td>${money(trade.exit)}</td>
-                <td class="${trade.pnl >= 0 ? "positive" : "negative"}">
-                  ${money(trade.pnl)}
-                </td>
+                <td class="${trade.pnl >= 0 ? "positive" : "negative"}">${money(trade.pnl)}</td>
+                <td>${esc(trade.exitReason || "MANUAL")}</td>
                 <td>${esc(new Date(trade.closedAt).toLocaleString())}</td>
               </tr>
             `).join("")}
@@ -1772,456 +2208,3 @@ function renderPaperAccount() {
         </table>
       `
       : '<p class="muted-note">No simulated trades yet.</p>';
-  }
-
-  updateRiskDisplay();
-}
-
-async function openPaperTrade() {
-  const symbol = $("paperSymbol").value;
-  const side = $("paperSide").value;
-  const amount = Number($("paperAmount").value);
-
-  const account = getPaperAccount();
-  const risk = getRiskSettings();
-
-  if (!Number.isFinite(amount) || amount < 10) {
-    toast("Enter a valid simulated amount of at least 10 USDT.");
-    return;
-  }
-
-  if (amount > account.balance) {
-    toast("Insufficient virtual balance.");
-    return;
-  }
-
-  const dailyLoss = getDailyRealizedLoss(account);
-  const dailyLimit = account.initialBalance *
-    risk.dailyLossLimit / 100;
-
-  if (Math.abs(dailyLoss) >= dailyLimit) {
-    toast("Daily simulated loss limit reached.");
-    return;
-  }
-
-  try {
-    const price = await currentPrice(symbol);
-
-    const position = {
-      id: String(Date.now()) + Math.random().toString(36).slice(2, 7),
-      symbol,
-      side,
-      amount,
-      entry: price,
-      openedAt: Date.now(),
-      openingFee: amount * FEE_RATE
-    };
-
-    account.balance -= amount + position.openingFee;
-
-    if (account.balance < 0) {
-      toast("Insufficient virtual balance after estimated fee.");
-      return;
-    }
-
-    account.positions.push(position);
-
-    savePaperAccount(account);
-
-    const status = $("paperStatus");
-
-    if (status) {
-      status.textContent =
-        "Simulated " + side + " opened for " +
-        symbol + " at " + money(price) + ".";
-    }
-
-    toast("Simulated trade opened.");
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-async function closePaperTrade(id) {
-  const account = getPaperAccount();
-
-  const index = account.positions.findIndex(
-    position => position.id === id
-  );
-
-  if (index < 0) return;
-
-  const position = account.positions[index];
-
-  try {
-    const exit = await currentPrice(position.symbol);
-
-    const direction = position.side === "LONG" ? 1 : -1;
-
-    const gross =
-      direction *
-      (exit - position.entry) /
-      position.entry *
-      position.amount;
-
-    const closingFee = position.amount * FEE_RATE;
-
-    const pnl =
-      gross -
-      position.openingFee -
-      closingFee;
-
-    account.balance += position.amount + gross - closingFee;
-    account.realized += pnl;
-
-    account.history.push({
-      ...position,
-      exit,
-      pnl,
-      closedAt: Date.now(),
-      closingFee
-    });
-
-    account.positions.splice(index, 1);
-
-    savePaperAccount(account);
-
-    toast("Simulated position closed.");
-
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-function resetPaperAccount() {
-  if (!confirm("Reset the simulated account and delete its trade history?")) {
-    return;
-  }
-
-  saveJSON(STORE.paper, defaultPaperAccount());
-
-  renderPaperAccount();
-
-  toast("Paper account reset.");
-}
-
-/* =========================================================
-   RISK MANAGEMENT
-========================================================= */
-
-function updateRiskDisplay() {
-  const account = getPaperAccount();
-  const settings = getRiskSettings();
-
-  const dailyLimit =
-    account.initialBalance * settings.dailyLossLimit / 100;
-
-  const dailyLoss = Math.abs(getDailyRealizedLoss(account));
-
-  const riskBudget =
-    settings.balance * settings.riskPercent / 100;
-
-  const output = $("riskResult");
-
-  if (output) {
-    output.innerHTML = `
-      <div class="result-card">
-        <div class="result-grid">
-          <div class="result-stat">
-            <span>Risk budget per trade</span>
-            <strong>${money(riskBudget)}</strong>
-          </div>
-          <div class="result-stat">
-            <span>Maximum daily loss</span>
-            <strong>${money(dailyLimit)}</strong>
-          </div>
-          <div class="result-stat">
-            <span>Realized loss today</span>
-            <strong>${money(dailyLoss)}</strong>
-          </div>
-        </div>
-        <p class="${dailyLoss >= dailyLimit ? "risk-warning" : "risk-safe"}">
-          ${dailyLoss >= dailyLimit
-            ? "Daily simulated loss limit reached."
-            : "Daily simulated loss limit has not been reached."}
-        </p>
-        <small>
-          Risk budget is a planning reference, not a guaranteed maximum loss.
-          The paper-trading module does not currently attach protective stop-loss
-          orders to simulated positions.
-        </small>
-      </div>
-    `;
-  }
-}
-
-function saveRiskSettings() {
-  const balance = Number($("riskBalance").value);
-  const riskPercent = Number($("riskPercent").value);
-  const dailyLossLimit = Number($("dailyLossLimit").value);
-
-  if (!Number.isFinite(balance) || balance < 100) {
-    toast("Enter a valid virtual account balance.");
-    return;
-  }
-
-  if (![0.5, 1, 2].includes(riskPercent)) {
-    toast("Invalid risk percentage.");
-    return;
-  }
-
-  if (![2, 3, 5].includes(dailyLossLimit)) {
-    toast("Invalid daily loss limit.");
-    return;
-  }
-
-  saveJSON(STORE.risk, {
-    balance,
-    riskPercent,
-    dailyLossLimit
-  });
-
-  updateRiskDisplay();
-
-  toast("Risk settings saved.");
-}
-
-/* =========================================================
-   ALERT SYSTEM
-========================================================= */
-
-function playAlertSound() {
-  try {
-    const AudioContext =
-      window.AudioContext || window.webkitAudioContext;
-
-    if (!AudioContext) return;
-
-    const context = new AudioContext();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-
-    oscillator.frequency.value = 800;
-    gain.gain.value = 0.08;
-
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-
-    oscillator.start();
-
-    setTimeout(() => {
-      oscillator.stop();
-      context.close();
-    }, 350);
-  } catch (error) {
-    console.warn("Alert sound unavailable.", error);
-  }
-}
-
-async function enableNotifications() {
-  if (!("Notification" in window)) {
-    toast("Browser notifications are not supported.");
-    return;
-  }
-
-  const permission = await Notification.requestPermission();
-
-  toast(
-    permission === "granted"
-      ? "Notifications enabled."
-      : "Notification permission was not granted."
-  );
-}
-
-function saveAlert(message) {
-  const log = readJSON(STORE.alerts, []);
-
-  log.push({
-    message,
-    time: Date.now()
-  });
-
-  saveJSON(STORE.alerts, log.slice(-50));
-
-  renderAlertLog();
-}
-
-function renderAlertLog() {
-  const container = $("alertLog");
-  if (!container) return;
-
-  const log = readJSON(STORE.alerts, []);
-
-  if (!log.length) {
-    container.innerHTML =
-      '<p class="muted-note">No alerts yet.</p>';
-    return;
-  }
-
-  container.innerHTML = log.slice().reverse().map(item => `
-    <div class="alert-item">
-      ${esc(item.message)}
-      <br>
-      <small>${esc(new Date(item.time).toLocaleString())}</small>
-    </div>
-  `).join("");
-}
-
-async function processAlert(result, symbol, interval, candles) {
-  if (result.signal === "WAIT") return;
-
-  const key = symbol + "_" + interval;
-
-  const states = readJSON(STORE.alertState, {});
-  const last = states[key];
-
-  const identity = result.signal + "_" + result.candleTime;
-
-  if (last === identity) return;
-
-  states[key] = identity;
-
-  saveJSON(STORE.alertState, states);
-
-  const message =
-    symbol + " " + result.signal +
-    " signal on " + interval +
-    ". Price: " + money(result.price);
-
-  saveAlert(message);
-
-  playAlertSound();
-
-  if ("Notification" in window && Notification.permission === "granted") {
-    new Notification("AGU Crypto Analyzer", {
-      body: message
-    });
-  }
-
-  if (navigator.vibrate) {
-    navigator.vibrate([150, 80, 150]);
-  }
-}
-
-function toggleMonitoring() {
-  const button = $("monitorBtn");
-
-  if (monitoring) {
-    clearInterval(monitorTimer);
-    monitorTimer = null;
-    monitoring = false;
-
-    if (button) button.textContent = "Start monitoring";
-
-    if ($("alertStatus")) {
-      $("alertStatus").textContent =
-        "Monitoring is off.";
-    }
-
-    return;
-  }
-
-  monitoring = true;
-
-  if (button) button.textContent = "Stop monitoring";
-
-  if ($("alertStatus")) {
-    $("alertStatus").textContent =
-      "Monitoring is active while this page remains open.";
-  }
-
-  runAnalysis(true);
-
-  monitorTimer = setInterval(() => {
-    if (document.visibilityState === "visible") {
-      runAnalysis(true);
-    }
-  }, 60000);
-
-  toast("Smart monitoring started.");
-}
-
-/* =========================================================
-   SECURITY STATUS
-========================================================= */
-
-function renderSecurityStatus() {
-  const el = $("securityStatus");
-  if (!el) return;
-
-  el.innerHTML = `
-    <div class="risk-warning">
-      <b>Frontend-only security status</b>
-      <p>Market data is retrieved from public Binance endpoints.</p>
-      <p>No exchange API secret is stored by this application.</p>
-      <p>No real orders or payments can be executed.</p>
-      <p>LocalStorage data is controlled by the browser and is not secure account storage.</p>
-      <p>Authenticated backend, server-side permissions, encrypted credentials,
-      audit logs, rate limiting and emergency trading controls are not yet installed.</p>
-      <b>Live automatic trading is disabled.</b>
-    </div>
-  `;
-}
-
-/* =========================================================
-   INITIALIZATION
-========================================================= */
-
-function initialize() {
-  applyTheme();
-
-  updateCredits();
-
-  renderAlertLog();
-
-  renderPaperAccount();
-
-  renderSecurityStatus();
-
-  loadMarkets();
-
-  if ($("year")) {
-    $("year").textContent = new Date().getFullYear();
-  }
-
-  $("themeBtn")?.addEventListener("click", toggleTheme);
-
-  $("refreshBtn")?.addEventListener("click", loadMarkets);
-
-  $("analyzeBtn")?.addEventListener("click", () => {
-    runAnalysis(false);
-  });
-
-  $("notifyBtn")?.addEventListener("click", enableNotifications);
-
-  $("monitorBtn")?.addEventListener("click", toggleMonitoring);
-
-  $("backtestBtn")?.addEventListener("click", runBacktest);
-
-  $("paperOpenBtn")?.addEventListener("click", openPaperTrade);
-
-  $("paperResetBtn")?.addEventListener("click", resetPaperAccount);
-
-  $("saveRiskBtn")?.addEventListener("click", saveRiskSettings);
-
-  $("paperPositions")?.addEventListener("click", event => {
-    const button = event.target.closest("[data-close-paper]");
-
-    if (button) {
-      closePaperTrade(button.dataset.closePaper);
-    }
-  });
-
-  setInterval(loadMarkets, 60000);
-
-  // Refresh paper account prices from the latest market snapshot.
-  setInterval(renderPaperAccount, 30000);
-
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js")
-      .catch(error => console.warn("Service worker:", error));
-  }
-}
-
-document.addEventListener("DOMContentLoaded", initialize);
