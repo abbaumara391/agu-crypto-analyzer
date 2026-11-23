@@ -2215,4 +2215,1947 @@ async function runBacktest() {
 
           <div class="result-stat">
             <span>Net return</span>
-           
+            <strong>${number(stats.totalReturn)}%</strong>
+          </div>
+
+          <div class="result-stat">
+            <span>Maximum drawdown</span>
+            <strong>${number(stats.maxDrawdown)}%</strong>
+          </div>
+
+          <div class="result-stat">
+            <span>Maximum winning streak</span>
+            <strong>${stats.maximumWinningStreak}</strong>
+          </div>
+
+          <div class="result-stat">
+            <span>Maximum losing streak</span>
+            <strong>${stats.maximumLosingStreak}</strong>
+          </div>
+
+        </div>
+
+        <h3>Execution assumptions</h3>
+
+        <p>Entry: next candle open after signal.</p>
+
+        <p>Fees: assumed 0.10% per side.</p>
+
+        <p>Slippage: assumed 0.05% per side.</p>
+
+        <p>
+          If stop-loss and target are touched
+          in the same candle, stop-loss is
+          assumed first.
+        </p>
+
+        <div class="risk-warning">
+          These are simulated historical results,
+          not live performance.
+
+          The simulation does not establish
+          future profitability.
+        </div>
+
+      </div>
+    `;
+
+    toast("V3.3 backtest completed.");
+
+  } catch (error) {
+    output.innerHTML =
+      `<div class="risk-warning">${esc(error.message)}</div>`;
+
+    toast(error.message);
+
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+/* =========================================================
+   PAPER ACCOUNT MIGRATION V3.2 -> V3.3
+========================================================= */
+
+function defaultPaperAccount() {
+  return {
+    balance: STARTING_BALANCE,
+
+    initialBalance: STARTING_BALANCE,
+
+    positions: [],
+
+    history: [],
+
+    realized: 0,
+
+    daily: {
+      date: dayKey(),
+      startEquity: STARTING_BALANCE,
+      locked: false
+    },
+
+    created: Date.now(),
+
+    version: VERSION
+  };
+}
+
+function migratePaperAccount() {
+  let account = readJSON(
+    STORE.paper,
+    null
+  );
+
+  if (account) {
+    return normalizePaperAccount(account);
+  }
+
+  // Read existing V3.2 account.
+  const old = readJSON(
+    STORE.oldPaper,
+    null
+  );
+
+  if (!old) {
+    return defaultPaperAccount();
+  }
+
+  /*
+    Preserve:
+    - Existing virtual balance.
+    - Existing positions.
+    - Existing trade history.
+    - Realized profit/loss.
+    - Initial account balance.
+
+    Legacy positions are not assigned invented
+    stop-loss or take-profit levels.
+  */
+
+  account = {
+    ...old,
+
+    positions: Array.isArray(old.positions)
+      ? old.positions.map(position => ({
+          ...position,
+
+          stopLoss:
+            Number.isFinite(Number(position.stopLoss))
+              ? Number(position.stopLoss)
+              : null,
+
+          takeProfit:
+            Number.isFinite(Number(position.takeProfit))
+              ? Number(position.takeProfit)
+              : null,
+
+          trailingEnabled: false,
+
+          trailingDistance: null,
+
+          highestPrice: Number(position.highestPrice) ||
+            Number(position.entry),
+
+          lowestPrice: Number(position.lowestPrice) ||
+            Number(position.entry),
+
+          legacyProtection:
+            !Number.isFinite(Number(position.stopLoss)) ||
+            !Number.isFinite(Number(position.takeProfit))
+        }))
+      : [],
+
+    history: Array.isArray(old.history)
+      ? old.history
+      : [],
+
+    daily: {
+      date: dayKey(),
+      startEquity: Number(old.balance) || STARTING_BALANCE,
+      locked: false
+    },
+
+    version: VERSION
+  };
+
+  normalizePaperAccount(account);
+
+  if (saveJSON(STORE.paper, account)) {
+    toast(
+      "V3.2 paper account migrated. Existing trades preserved."
+    );
+  }
+
+  return account;
+}
+
+function normalizePaperAccount(account) {
+  account = account || defaultPaperAccount();
+
+  account.balance =
+    Number(account.balance) || 0;
+
+  account.initialBalance =
+    Number(account.initialBalance) ||
+    STARTING_BALANCE;
+
+  account.realized =
+    Number(account.realized) || 0;
+
+  account.positions =
+    Array.isArray(account.positions)
+      ? account.positions
+      : [];
+
+  account.history =
+    Array.isArray(account.history)
+      ? account.history
+      : [];
+
+  account.positions.forEach(position => {
+    if (!position.id) {
+      position.id =
+        String(Date.now()) +
+        Math.random().toString(36).slice(2, 8);
+    }
+
+    position.amount =
+      Number(position.amount) || 0;
+
+    position.entry =
+      Number(position.entry) || 0;
+
+    position.openingFee =
+      Number(position.openingFee) || 0;
+
+    position.stopLoss =
+      Number.isFinite(Number(position.stopLoss))
+        ? Number(position.stopLoss)
+        : null;
+
+    position.takeProfit =
+      Number.isFinite(Number(position.takeProfit))
+        ? Number(position.takeProfit)
+        : null;
+
+    position.trailingEnabled =
+      Boolean(position.trailingEnabled);
+
+    position.highestPrice =
+      Number(position.highestPrice) ||
+      position.entry;
+
+    position.lowestPrice =
+      Number(position.lowestPrice) ||
+      position.entry;
+
+    position.legacyProtection =
+      Boolean(position.legacyProtection);
+  });
+
+  if (!account.daily) {
+    account.daily = {
+      date: dayKey(),
+      startEquity: account.balance,
+      locked: false
+    };
+  }
+
+  account.version = VERSION;
+
+  return account;
+}
+
+function getPaperAccount() {
+  return migratePaperAccount();
+}
+
+function savePaperAccount(account) {
+  account.version = VERSION;
+
+  if (saveJSON(STORE.paper, account)) {
+    renderPaperAccount();
+    return true;
+  }
+
+  return false;
+}
+
+/* =========================================================
+   RISK SETTINGS MIGRATION
+========================================================= */
+
+function getRiskSettings() {
+  let settings = readJSON(
+    STORE.risk,
+    null
+  );
+
+  if (!settings) {
+    settings = readJSON(
+      STORE.oldRisk,
+      null
+    );
+  }
+
+  settings = {
+    ...DEFAULT_RISK,
+    ...(settings || {})
+  };
+
+  settings.riskPercent =
+    Number(settings.riskPercent) || 1;
+
+  settings.dailyLossLimit =
+    Number(settings.dailyLossLimit) || 3;
+
+  settings.stopATR =
+    Number(settings.stopATR) || 1.5;
+
+  settings.targetRR =
+    Number(settings.targetRR) || 2;
+
+  settings.trailingATR =
+    Number(settings.trailingATR) || 1.5;
+
+  settings.trailingEnabled =
+    Boolean(settings.trailingEnabled);
+
+  saveJSON(STORE.risk, settings);
+
+  return settings;
+}
+
+/* =========================================================
+   PAPER ACCOUNT EQUITY
+========================================================= */
+
+function calculatePositionPnL(position, price) {
+  const direction =
+    position.side === "LONG" ? 1 : -1;
+
+  return (
+    direction *
+    (price - position.entry) /
+    position.entry *
+    position.amount
+  );
+}
+
+function getPositionPrice(position) {
+  return Number(
+    lastMarketPrices[position.symbol]
+  ) || Number(position.entry);
+}
+
+function calculatePaperEquity(account) {
+  let equity = account.balance;
+
+  account.positions.forEach(position => {
+    const price = getPositionPrice(position);
+
+    equity +=
+      position.amount +
+      calculatePositionPnL(position, price);
+  });
+
+  return equity;
+}
+
+function ensureDailyBaseline(account) {
+  const today = dayKey();
+
+  if (
+    !account.daily ||
+    account.daily.date !== today
+  ) {
+    account.daily = {
+      date: today,
+
+      startEquity:
+        calculatePaperEquity(account),
+
+      locked: false
+    };
+
+    saveJSON(STORE.paper, account);
+  }
+}
+
+function getDailyEquityLoss(account) {
+  ensureDailyBaseline(account);
+
+  const equity =
+    calculatePaperEquity(account);
+
+  const starting =
+    Number(account.daily.startEquity) || equity;
+
+  return Math.max(0, starting - equity);
+}
+
+function getDailyLossLimitAmount(account) {
+  const settings = getRiskSettings();
+
+  const baseline =
+    Number(account.daily.startEquity) ||
+    account.initialBalance;
+
+  return baseline *
+    settings.dailyLossLimit / 100;
+}
+
+function isDailyLossLocked(account) {
+  ensureDailyBaseline(account);
+
+  const limit =
+    getDailyLossLimitAmount(account);
+
+  const loss =
+    getDailyEquityLoss(account);
+
+  return Boolean(account.daily.locked) ||
+    loss >= limit;
+}
+
+/* =========================================================
+   PAPER ACCOUNT PRICE
+========================================================= */
+
+async function currentPrice(symbol) {
+  const cached =
+    Number(lastMarketPrices[symbol]);
+
+  if (cached > 0) {
+    return cached;
+  }
+
+  const data = await request(
+    API.spot +
+    "/ticker/price?symbol=" +
+    encodeURIComponent(symbol)
+  );
+
+  const price = Number(data.price);
+
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error("Invalid market price.");
+  }
+
+  lastMarketPrices[symbol] = price;
+
+  return price;
+}
+
+/* =========================================================
+   PAPER ACCOUNT DISPLAY
+========================================================= */
+
+function renderPaperAccount() {
+  const account = getPaperAccount();
+
+  ensureDailyBaseline(account);
+
+  const equity =
+    calculatePaperEquity(account);
+
+  let unrealized = 0;
+
+  account.positions.forEach(position => {
+    unrealized += calculatePositionPnL(
+      position,
+      getPositionPrice(position)
+    );
+  });
+
+  if ($("paperBalance")) {
+    $("paperBalance").textContent =
+      money(account.balance);
+  }
+
+  if ($("paperOpenCount")) {
+    $("paperOpenCount").textContent =
+      account.positions.length;
+  }
+
+  if ($("paperClosedCount")) {
+    $("paperClosedCount").textContent =
+      account.history.length;
+  }
+
+  if ($("paperPnL")) {
+    $("paperPnL").textContent =
+      money(account.realized);
+  }
+
+  const positions = $("paperPositions");
+
+  if (positions) {
+    positions.innerHTML =
+      account.positions.length
+        ? `
+          <table>
+
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>Current</th>
+                <th>Stop</th>
+                <th>Target</th>
+                <th>P/L</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              ${account.positions.map(position => {
+                const price =
+                  getPositionPrice(position);
+
+                const pnl =
+                  calculatePositionPnL(
+                    position,
+                    price
+                  );
+
+                return `
+                  <tr>
+
+                    <td>${esc(position.symbol)}</td>
+
+                    <td>${esc(position.side)}</td>
+
+                    <td>${money(position.entry)}</td>
+
+                    <td>${money(price)}</td>
+
+                    <td>
+                      ${position.stopLoss
+                        ? money(position.stopLoss)
+                        : "Not set"}
+                    </td>
+
+                    <td>
+                      ${position.takeProfit
+                        ? money(position.takeProfit)
+                        : "Not set"}
+                    </td>
+
+                    <td class="${pnl >= 0 ? "positive" : "negative"}">
+                      ${money(pnl)}
+                    </td>
+
+                    <td>
+                      <button
+                        class="outline"
+                        data-close-paper="${esc(position.id)}">
+                        Close
+                      </button>
+                    </td>
+
+                  </tr>
+                `;
+              }).join("")}
+
+            </tbody>
+
+          </table>
+        `
+        : '<p class="muted-note">No open simulated positions.</p>';
+  }
+
+  const history = $("paperHistory");
+
+  if (history) {
+    history.innerHTML =
+      account.history.length
+        ? `
+          <table>
+
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Profit/Loss</th>
+                <th>Closed</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              ${account.history
+                .slice()
+                .reverse()
+                .slice(0, 100)
+                .map(trade => `
+                  <tr>
+
+                    <td>${esc(trade.symbol)}</td>
+
+                    <td>${esc(trade.side)}</td>
+
+                    <td>${money(trade.entry)}</td>
+
+                    <td>${money(trade.exit)}</td>
+
+                    <td class="${trade.pnl >= 0 ? "positive" : "negative"}">
+                      ${money(trade.pnl)}
+                    </td>
+
+                    <td>
+                      ${esc(new Date(
+                        trade.closedAt
+                      ).toLocaleString())}
+                    </td>
+
+                  </tr>
+                `).join("")}
+
+            </tbody>
+
+          </table>
+        `
+        : '<p class="muted-note">No simulated trades yet.</p>';
+  }
+
+  updateRiskDisplay();
+}
+
+/* =========================================================
+   AUTOMATIC PAPER TRADE EXECUTION
+========================================================= */
+
+async function createPaperTradePlan(
+  symbol,
+  side,
+  entry,
+  settings
+) {
+  let volatility = null;
+
+  // Prefer the latest matching analysis.
+  if (
+    lastAnalysis &&
+    lastAnalysis.symbol === symbol &&
+    lastAnalysis.result.atr > 0
+  ) {
+    volatility =
+      lastAnalysis.result.atr;
+  }
+
+  // Otherwise obtain fresh ATR data.
+  if (!volatility) {
+    const candles = await getCandles(
+      symbol,
+      "15m",
+      "spot",
+      250
+    );
+
+    volatility = atr(candles);
+  }
+
+  if (!Number.isFinite(volatility) || volatility <= 0) {
+    throw new Error(
+      "Unable to calculate a reliable stop distance."
+    );
+  }
+
+  const stopDistance =
+    volatility * settings.stopATR;
+
+  let stopLoss;
+  let takeProfit;
+
+  if (side === "LONG") {
+    stopLoss = entry - stopDistance;
+
+    takeProfit =
+      entry + stopDistance * settings.targetRR;
+
+  } else {
+    stopLoss = entry + stopDistance;
+
+    takeProfit =
+      entry - stopDistance * settings.targetRR;
+  }
+
+  if (
+    stopLoss <= 0 ||
+    takeProfit <= 0 ||
+    !Number.isFinite(stopLoss) ||
+    !Number.isFinite(takeProfit)
+  ) {
+    throw new Error("Invalid protective levels.");
+  }
+
+  return {
+    stopLoss,
+    takeProfit,
+    stopDistance,
+    atr: volatility
+  };
+}
+
+/* =========================================================
+   RISK-BASED POSITION SIZING
+========================================================= */
+
+function calculatePositionSize(
+  equity,
+  availableBalance,
+  entry,
+  stopDistance,
+  settings,
+  manualCap
+) {
+  if (
+    equity <= 0 ||
+    availableBalance <= 0 ||
+    entry <= 0 ||
+    stopDistance <= 0
+  ) {
+    throw new Error("Invalid position sizing inputs.");
+  }
+
+  const riskBudget =
+    equity * settings.riskPercent / 100;
+
+  const stopFraction =
+    stopDistance / entry;
+
+  if (
+    !Number.isFinite(stopFraction) ||
+    stopFraction <= 0
+  ) {
+    throw new Error("Invalid stop distance.");
+  }
+
+  // Position notional = risk budget / stop percentage.
+  const calculatedNotional =
+    riskBudget / stopFraction;
+
+  // Reserve enough virtual balance for opening fees.
+  const availableNotional =
+    availableBalance / (1 + FEE_RATE);
+
+  let amount = Math.min(
+    calculatedNotional,
+    availableNotional
+  );
+
+  // Optional existing amount field acts as a maximum cap.
+  if (
+    Number.isFinite(manualCap) &&
+    manualCap > 0
+  ) {
+    amount = Math.min(amount, manualCap);
+  }
+
+  if (amount < 10) {
+    throw new Error(
+      "Calculated position is too small. Check available virtual balance."
+    );
+  }
+
+  return {
+    amount,
+
+    riskBudget,
+
+    actualRisk:
+      amount * stopFraction,
+
+    quantity:
+      amount / entry
+  };
+}
+
+/* =========================================================
+   OPEN PAPER TRADE
+========================================================= */
+
+async function openPaperTrade() {
+  const symbol =
+    $("paperSymbol").value;
+
+  const side =
+    $("paperSide").value;
+
+  if (!["LONG", "SHORT"].includes(side)) {
+    toast("Select a valid simulated trading direction.");
+    return;
+  }
+
+  const account = getPaperAccount();
+
+  const settings = getRiskSettings();
+
+  ensureDailyBaseline(account);
+
+  if (isDailyLossLocked(account)) {
+    toast(
+      "Daily equity-loss protection is active. New positions are blocked."
+    );
+    return;
+  }
+
+  try {
+    const price = await currentPrice(symbol);
+
+    const plan = await createPaperTradePlan(
+      symbol,
+      side,
+      price,
+      settings
+    );
+
+    const equity =
+      calculatePaperEquity(account);
+
+    const manualCap =
+      Number($("paperAmount")?.value);
+
+    const sizing = calculatePositionSize(
+      equity,
+      account.balance,
+      price,
+      plan.stopDistance,
+      settings,
+      manualCap
+    );
+
+    const amount = sizing.amount;
+
+    const openingFee =
+      amount * FEE_RATE;
+
+    const position = {
+      id:
+        String(Date.now()) +
+        Math.random().toString(36).slice(2, 8),
+
+      symbol,
+      side,
+
+      amount,
+
+      quantity: sizing.quantity,
+
+      entry: price,
+
+      stopLoss: plan.stopLoss,
+
+      takeProfit: plan.takeProfit,
+
+      trailingEnabled:
+        settings.trailingEnabled,
+
+      trailingDistance:
+        plan.atr * settings.trailingATR,
+
+      highestPrice: price,
+
+      lowestPrice: price,
+
+      openingFee,
+
+      riskBudget: sizing.riskBudget,
+
+      actualRisk: sizing.actualRisk,
+
+      openedAt: Date.now(),
+
+      legacyProtection: false,
+
+      protectionStatus: "ACTIVE"
+    };
+
+    const required =
+      amount + openingFee;
+
+    if (required > account.balance) {
+      throw new Error(
+        "Insufficient virtual balance after estimated fees."
+      );
+    }
+
+    account.balance -= required;
+
+    account.positions.push(position);
+
+    if (!savePaperAccount(account)) {
+      throw new Error(
+        "Unable to save the new paper position."
+      );
+    }
+
+    const status = $("paperStatus");
+
+    if (status) {
+      status.textContent =
+        "PAPER " + side +
+        " opened for " + symbol +
+        " at " + money(price) +
+        ". Position: " + money(amount) +
+        ". Risk budget: " + money(sizing.riskBudget) +
+        ". Stop: " + money(plan.stopLoss) +
+        ". Target: " + money(plan.takeProfit) +
+        ".";
+    }
+
+    toast(
+      "Paper position opened with automatic protection."
+    );
+
+  } catch (error) {
+    console.error(error);
+    toast(error.message);
+  }
+}
+
+/* =========================================================
+   CLOSE PAPER TRADE
+========================================================= */
+
+async function closePaperTradeAtPrice(
+  id,
+  exit,
+  reason = "MANUAL"
+) {
+  const account = getPaperAccount();
+
+  const index =
+    account.positions.findIndex(
+      position => position.id === id
+    );
+
+  if (index < 0) return false;
+
+  const position =
+    account.positions[index];
+
+  if (
+    !Number.isFinite(exit) ||
+    exit <= 0
+  ) {
+    return false;
+  }
+
+  const direction =
+    position.side === "LONG" ? 1 : -1;
+
+  const gross =
+    direction *
+    (exit - position.entry) /
+    position.entry *
+    position.amount;
+
+  const closingFee =
+    position.amount * FEE_RATE;
+
+  const pnl =
+    gross -
+    position.openingFee -
+    closingFee;
+
+  account.balance +=
+    position.amount +
+    gross -
+    closingFee;
+
+  account.realized += pnl;
+
+  account.history.push({
+    ...position,
+
+    exit,
+
+    pnl,
+
+    gross,
+
+    closingFee,
+
+    closeReason: reason,
+
+    closedAt: Date.now()
+  });
+
+  account.positions.splice(index, 1);
+
+  return savePaperAccount(account);
+}
+
+async function closePaperTrade(id) {
+  const account = getPaperAccount();
+
+  const position =
+    account.positions.find(
+      item => item.id === id
+    );
+
+  if (!position) return;
+
+  try {
+    const exit =
+      await currentPrice(position.symbol);
+
+    const saved = await closePaperTradeAtPrice(
+      id,
+      exit,
+      "MANUAL"
+    );
+
+    if (saved) {
+      toast("Paper position closed.");
+    }
+
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+/* =========================================================
+   AUTOMATIC TRAILING STOP
+========================================================= */
+
+function updateTrailingStop(position, price) {
+  if (!position.trailingEnabled) return false;
+
+  const distance =
+    Number(position.trailingDistance);
+
+  if (!Number.isFinite(distance) || distance <= 0) {
+    return false;
+  }
+
+  let changed = false;
+
+  if (position.side === "LONG") {
+    position.highestPrice = Math.max(
+      Number(position.highestPrice) || position.entry,
+      price
+    );
+
+    // Activate only after a favorable move.
+    if (position.highestPrice > position.entry) {
+      const newStop =
+        position.highestPrice - distance;
+
+      if (
+        !position.stopLoss ||
+        newStop > position.stopLoss
+      ) {
+        position.stopLoss = newStop;
+        changed = true;
+      }
+    }
+
+  } else {
+    position.lowestPrice = Math.min(
+      Number(position.lowestPrice) || position.entry,
+      price
+    );
+
+    if (position.lowestPrice < position.entry) {
+      const newStop =
+        position.lowestPrice + distance;
+
+      if (
+        !position.stopLoss ||
+        newStop < position.stopLoss
+      ) {
+        position.stopLoss = newStop;
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
+
+/* =========================================================
+   DAILY LOSS PROTECTION
+========================================================= */
+
+async function enforceDailyLossProtection() {
+  const account = getPaperAccount();
+
+  if (isDailyLossLocked(account)) {
+    account.daily.locked = true;
+
+    saveJSON(STORE.paper, account);
+
+    // Close all remaining positions when the daily
+    // equity-loss threshold is reached.
+
+    const positions =
+      [...account.positions];
+
+    for (const position of positions) {
+      try {
+        const price =
+          await currentPrice(position.symbol);
+
+        await closePaperTradeAtPrice(
+          position.id,
+          price,
+          "DAILY_LOSS_PROTECTION"
+        );
+
+      } catch (error) {
+        console.error(
+          "Daily protection close failed:",
+          error
+        );
+      }
+    }
+
+    account.daily.locked = true;
+
+    saveJSON(STORE.paper, account);
+
+    renderPaperAccount();
+
+    toast(
+      "Daily equity-loss limit reached. Paper trading locked for today."
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+/* =========================================================
+   AUTOMATIC PAPER POSITION MONITOR
+========================================================= */
+
+async function managePaperPositions() {
+  if (managingPaper) return;
+
+  managingPaper = true;
+
+  try {
+    let account = getPaperAccount();
+
+    if (!account.positions.length) {
+      updateRiskDisplay();
+      return;
+    }
+
+    ensureDailyBaseline(account);
+
+    let changed = false;
+
+    for (const position of [...account.positions]) {
+      try {
+        const price =
+          await currentPrice(position.symbol);
+
+        const updated =
+          updateTrailingStop(position, price);
+
+        if (updated) {
+          changed = true;
+        }
+
+        const stopHit =
+          position.stopLoss &&
+          (
+            position.side === "LONG"
+              ? price <= position.stopLoss
+              : price >= position.stopLoss
+          );
+
+        const targetHit =
+          position.takeProfit &&
+          (
+            position.side === "LONG"
+              ? price >= position.takeProfit
+              : price <= position.takeProfit
+          );
+
+        if (stopHit || targetHit) {
+          const reason = stopHit
+            ? position.trailingEnabled
+              ? "STOP_LOSS_OR_TRAILING_STOP"
+              : "STOP_LOSS"
+            : "TAKE_PROFIT";
+
+          await closePaperTradeAtPrice(
+            position.id,
+            price,
+            reason
+          );
+
+          toast(
+            position.symbol +
+            " paper position automatically closed: " +
+            reason
+          );
+        }
+
+      } catch (error) {
+        console.error(
+          "Paper position monitoring:",
+          error
+        );
+      }
+    }
+
+    account = getPaperAccount();
+
+    if (changed) {
+      saveJSON(STORE.paper, account);
+    }
+
+    // Calculate daily loss using actual account equity,
+    // including unrealized losses.
+    const locked =
+      await enforceDailyLossProtection();
+
+    if (!locked) {
+      renderPaperAccount();
+    }
+
+  } finally {
+    managingPaper = false;
+  }
+}
+
+/* =========================================================
+   RESET PAPER ACCOUNT
+========================================================= */
+
+function resetPaperAccount() {
+  if (!confirm(
+    "Reset the simulated account and delete its trade history?"
+  )) {
+    return;
+  }
+
+  saveJSON(
+    STORE.paper,
+    defaultPaperAccount()
+  );
+
+  renderPaperAccount();
+
+  toast("Paper account reset.");
+}
+
+/* =========================================================
+   RISK MANAGEMENT DISPLAY
+========================================================= */
+
+function updateRiskDisplay() {
+  const account = getPaperAccount();
+
+  const settings = getRiskSettings();
+
+  ensureDailyBaseline(account);
+
+  const equity =
+    calculatePaperEquity(account);
+
+  const dailyLimit =
+    getDailyLossLimitAmount(account);
+
+  const dailyLoss =
+    getDailyEquityLoss(account);
+
+  const riskBudget =
+    equity * settings.riskPercent / 100;
+
+  const remaining =
+    Math.max(0, dailyLimit - dailyLoss);
+
+  const output = $("riskResult");
+
+  if (!output) return;
+
+  output.innerHTML = `
+    <div class="result-card">
+
+      <h3>V3.3 Risk Management</h3>
+
+      <p>
+        <b>SIMULATED PAPER TRADING ONLY</b>
+      </p>
+
+      <div class="result-grid">
+
+        <div class="result-stat">
+          <span>Account equity</span>
+          <strong>${money(equity)}</strong>
+        </div>
+
+        <div class="result-stat">
+          <span>Available balance</span>
+          <strong>${money(account.balance)}</strong>
+        </div>
+
+        <div class="result-stat">
+          <span>Unrealized P/L</span>
+          <strong>${money(
+            account.positions.reduce(
+              (sum, p) =>
+                sum + calculatePositionPnL(
+                  p,
+                  getPositionPrice(p)
+                ),
+              0
+            )
+          )}</strong>
+        </div>
+
+        <div class="result-stat">
+          <span>Risk budget per trade</span>
+          <strong>${money(riskBudget)}</strong>
+        </div>
+
+        <div class="result-stat">
+          <span>Daily loss limit</span>
+          <strong>${money(dailyLimit)}</strong>
+        </div>
+
+        <div class="result-stat">
+          <span>Daily equity loss</span>
+          <strong>${money(dailyLoss)}</strong>
+        </div>
+
+        <div class="result-stat">
+          <span>Remaining daily allowance</span>
+          <strong>${money(remaining)}</strong>
+        </div>
+
+      </div>
+
+      <h3>Automatic protection settings</h3>
+
+      <div class="metric">
+
+        <label>
+          <input
+            type="checkbox"
+            id="paperTrailingEnabled"
+            ${settings.trailingEnabled ? "checked" : ""}
+          >
+
+          Enable trailing stop
+        </label>
+
+      </div>
+
+      <div class="metric">
+
+        <label>
+          Trailing stop ATR multiplier
+
+          <input
+            type="number"
+            id="paperTrailingATR"
+            min="0.5"
+            max="5"
+            step="0.5"
+            value="${settings.trailingATR}"
+          >
+        </label>
+
+      </div>
+
+      <div class="metric">
+
+        <label>
+          Stop-loss ATR multiplier
+
+          <input
+            type="number"
+            id="paperStopATR"
+            min="0.5"
+            max="5"
+            step="0.5"
+            value="${settings.stopATR}"
+          >
+        </label>
+
+      </div>
+
+      <div class="metric">
+
+        <label>
+          Take-profit reward/risk ratio
+
+          <input
+            type="number"
+            id="paperTargetRR"
+            min="1"
+            max="5"
+            step="0.5"
+            value="${settings.targetRR}"
+          >
+        </label>
+
+      </div>
+
+      <button
+        type="button"
+        id="savePaperProtectionBtn"
+        class="outline">
+        Save protection settings
+      </button>
+
+      <p class="${
+        isDailyLossLocked(account)
+          ? "risk-warning"
+          : "risk-safe"
+      }">
+
+        ${
+          isDailyLossLocked(account)
+            ? "DAILY LOSS PROTECTION ACTIVE — New positions blocked."
+            : "Daily equity-loss protection is active."
+        }
+
+      </p>
+
+      <small>
+        Daily loss is calculated from account equity,
+        including unrealized profit and loss.
+      </small>
+
+    </div>
+  `;
+
+  $("savePaperProtectionBtn")
+    ?.addEventListener(
+      "click",
+      savePaperProtectionSettings
+    );
+}
+
+function savePaperProtectionSettings() {
+  const settings = getRiskSettings();
+
+  const trailingEnabled =
+    $("paperTrailingEnabled")?.checked || false;
+
+  const trailingATR =
+    Number($("paperTrailingATR")?.value);
+
+  const stopATR =
+    Number($("paperStopATR")?.value);
+
+  const targetRR =
+    Number($("paperTargetRR")?.value);
+
+  if (
+    !Number.isFinite(trailingATR) ||
+    trailingATR < 0.5 ||
+    trailingATR > 5
+  ) {
+    toast("Invalid trailing stop multiplier.");
+    return;
+  }
+
+  if (
+    !Number.isFinite(stopATR) ||
+    stopATR < 0.5 ||
+    stopATR > 5
+  ) {
+    toast("Invalid stop-loss multiplier.");
+    return;
+  }
+
+  if (
+    !Number.isFinite(targetRR) ||
+    targetRR < 1 ||
+    targetRR > 5
+  ) {
+    toast("Invalid reward/risk ratio.");
+    return;
+  }
+
+  settings.trailingEnabled = trailingEnabled;
+
+  settings.trailingATR = trailingATR;
+
+  settings.stopATR = stopATR;
+
+  settings.targetRR = targetRR;
+
+  saveJSON(STORE.risk, settings);
+
+  updateRiskDisplay();
+
+  toast("Paper protection settings saved.");
+}
+
+/* =========================================================
+   RISK SETTINGS
+========================================================= */
+
+function saveRiskSettings() {
+  const balance =
+    Number($("riskBalance").value);
+
+  const riskPercent =
+    Number($("riskPercent").value);
+
+  const dailyLossLimit =
+    Number($("dailyLossLimit").value);
+
+  if (
+    !Number.isFinite(balance) ||
+    balance < 100
+  ) {
+    toast("Enter a valid virtual account balance.");
+    return;
+  }
+
+  if (![0.5, 1, 2].includes(riskPercent)) {
+    toast("Invalid risk percentage.");
+    return;
+  }
+
+  if (![2, 3, 5].includes(dailyLossLimit)) {
+    toast("Invalid daily loss limit.");
+    return;
+  }
+
+  const settings = getRiskSettings();
+
+  settings.balance = balance;
+
+  settings.riskPercent = riskPercent;
+
+  settings.dailyLossLimit = dailyLossLimit;
+
+  saveJSON(STORE.risk, settings);
+
+  updateRiskDisplay();
+
+  toast("Risk settings saved.");
+}
+
+/* =========================================================
+   ALERT SYSTEM
+========================================================= */
+
+function playAlertSound() {
+  try {
+    const AudioContext =
+      window.AudioContext ||
+      window.webkitAudioContext;
+
+    if (!AudioContext) return;
+
+    const context = new AudioContext();
+
+    const oscillator =
+      context.createOscillator();
+
+    const gain =
+      context.createGain();
+
+    oscillator.frequency.value = 800;
+
+    gain.gain.value = 0.08;
+
+    oscillator.connect(gain);
+
+    gain.connect(context.destination);
+
+    oscillator.start();
+
+    setTimeout(() => {
+      oscillator.stop();
+      context.close();
+    }, 350);
+
+  } catch (error) {
+    console.warn(
+      "Alert sound unavailable.",
+      error
+    );
+  }
+}
+
+async function enableNotifications() {
+  if (!("Notification" in window)) {
+    toast(
+      "Browser notifications are not supported."
+    );
+    return;
+  }
+
+  const permission =
+    await Notification.requestPermission();
+
+  toast(
+    permission === "granted"
+      ? "Notifications enabled."
+      : "Notification permission was not granted."
+  );
+}
+
+function saveAlert(message) {
+  const log = readJSON(
+    STORE.alerts,
+    []
+  );
+
+  log.push({
+    message,
+    time: Date.now()
+  });
+
+  saveJSON(
+    STORE.alerts,
+    log.slice(-50)
+  );
+
+  renderAlertLog();
+}
+
+function renderAlertLog() {
+  const container = $("alertLog");
+
+  if (!container) return;
+
+  const log = readJSON(
+    STORE.alerts,
+    []
+  );
+
+  if (!log.length) {
+    container.innerHTML =
+      '<p class="muted-note">No alerts yet.</p>';
+
+    return;
+  }
+
+  container.innerHTML =
+    log.slice().reverse().map(item => `
+      <div class="alert-item">
+
+        ${esc(item.message)}
+
+        <br>
+
+        <small>
+          ${esc(new Date(item.time).toLocaleString())}
+        </small>
+
+      </div>
+    `).join("");
+}
+
+async function processAlert(
+  result,
+  symbol,
+  interval
+) {
+  if (result.signal === "WAIT") return;
+
+  const key =
+    symbol + "_" + interval;
+
+  const states = readJSON(
+    STORE.alertState,
+    {}
+  );
+
+  const last = states[key];
+
+  const identity =
+    result.signal + "_" + result.candleTime;
+
+  if (last === identity) return;
+
+  states[key] = identity;
+
+  saveJSON(
+    STORE.alertState,
+    states
+  );
+
+  const message =
+    symbol +
+    " " +
+    result.signal +
+    " signal on " +
+    interval +
+    ". Price: " +
+    money(result.price);
+
+  saveAlert(message);
+
+  playAlertSound();
+
+  if (
+    "Notification" in window &&
+    Notification.permission === "granted"
+  ) {
+    new Notification(
+      "AGU Crypto Analyzer",
+      { body: message }
+    );
+  }
+
+  if (navigator.vibrate) {
+    navigator.vibrate([150, 80, 150]);
+  }
+}
+
+function toggleMonitoring() {
+  const button = $("monitorBtn");
+
+  if (monitoring) {
+    clearInterval(monitorTimer);
+
+    monitorTimer = null;
+
+    monitoring = false;
+
+    if (button) {
+      button.textContent = "Start monitoring";
+    }
+
+    if ($("alertStatus")) {
+      $("alertStatus").textContent =
+        "Monitoring is off.";
+    }
+
+    return;
+  }
+
+  monitoring = true;
+
+  if (button) {
+    button.textContent = "Stop monitoring";
+  }
+
+  if ($("alertStatus")) {
+    $("alertStatus").textContent =
+      "Monitoring is active while this page remains open.";
+  }
+
+  runAnalysis(true);
+
+  monitorTimer = setInterval(() => {
+    if (
+      document.visibilityState === "visible"
+    ) {
+      runAnalysis(true);
+    }
+  }, 60000);
+
+  toast("Smart monitoring started.");
+}
+
+/* =========================================================
+   SECURITY STATUS
+========================================================= */
+
+function renderSecurityStatus() {
+  const el = $("securityStatus");
+
+  if (!el) return;
+
+  el.innerHTML = `
+    <div class="risk-warning">
+
+      <b>AGU CRYPTO ANALYZER V3.3 SECURITY STATUS</b>
+
+      <p>
+        Market data is retrieved from public Binance endpoints.
+      </p>
+
+      <p>
+        No exchange API secret is stored by this application.
+      </p>
+
+      <p>
+        No real orders can be executed.
+      </p>
+
+      <p>
+        No real money is deposited, withdrawn or transferred.
+      </p>
+
+      <p>
+        Paper trading is simulated inside browser storage.
+      </p>
+
+      <p>
+        Automatic stop-loss and take-profit are
+        browser-side simulations.
+      </p>
+
+      <p>
+        Automatic paper monitoring requires the
+        application to remain open and connected.
+      </p>
+
+      <p>
+        LocalStorage is not secure account storage.
+      </p>
+
+      <p>
+        Authenticated backend, server-side permissions,
+        encrypted credentials, audit logs and
+        independent execution infrastructure
+        are not installed.
+      </p>
+
+      <b>
+        REAL EXCHANGE TRADING: DISABLED
+      </b>
+
+    </div>
+  `;
+}
+
+/* =========================================================
+   INITIALIZATION
+========================================================= */
+
+function initialize() {
+  applyTheme();
+
+  updateCredits();
+
+  renderAlertLog();
+
+  // Automatically migrate V3.2 paper account.
+  migratePaperAccount();
+
+  getRiskSettings();
+
+  renderPaperAccount();
+
+  renderSecurityStatus();
+
+  loadMarkets();
+
+  if ($("year")) {
+    $("year").textContent =
+      new Date().getFullYear();
+  }
+
+  $("themeBtn")
+    ?.addEventListener(
+      "click",
+      toggleTheme
+    );
+
+  $("refreshBtn")
+    ?.addEventListener(
+      "click",
+      loadMarkets
+    );
+
+  $("analyzeBtn")
+    ?.addEventListener(
+      "click",
+      () => runAnalysis(false)
+    );
+
+  $("notifyBtn")
+    ?.addEventListener(
+      "click",
+      enableNotifications
+    );
+
+  $("monitorBtn")
+    ?.addEventListener(
+      "click",
+      toggleMonitoring
+    );
+
+  $("backtestBtn")
+    ?.addEventListener(
+      "click",
+      runBacktest
+    );
+
+  $("paperOpenBtn")
+    ?.addEventListener(
+      "click",
+      openPaperTrade
+    );
+
+  $("paperResetBtn")
+    ?.addEventListener(
+      "click",
+      resetPaperAccount
+    );
+
+  $("saveRiskBtn")
+    ?.addEventListener(
+      "click",
+      saveRiskSettings
+    );
+
+  $("paperPositions")
+    ?.addEventListener(
+      "click",
+      event => {
+        const button =
+          event.target.closest(
+            "[data-close-paper]"
+          );
+
+        if (button) {
+          closePaperTrade(
+            button.dataset.closePaper
+          );
+        }
+      }
+    );
+
+  // Refresh market data every minute.
+  setInterval(
+    loadMarkets,
+    60000
+  );
+
+  // Independently monitor simulated positions.
+  setInterval(
+    managePaperPositions,
+    15000
+  );
+
+  // Refresh account display.
+  setInterval(
+    renderPaperAccount,
+    30000
+  );
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js")
+      .catch(error =>
+        console.warn("Service worker:", error)
+      );
+  }
+
+  console.log(
+    "AGU CRYPTO ANALYZER V" +
+    VERSION +
+    " initialized."
+  );
+}
+
+document.addEventListener(
+  "DOMContentLoaded",
+  initialize
+);
